@@ -15,7 +15,7 @@ Projeto acadêmico da disciplina de Banco de Dados, na **Universidade Católica 
 | **Extra: NoSQL** | MongoDB para fichas técnicas (esquema flexível, índice curinga) e log de eventos (TTL, agregações), com conta de menor privilégio. Demo em [`db/nosql/demo/demo_nosql.js`](db/nosql/demo/demo_nosql.js) |
 | Testes | 31 testes automatizados: 26 de ponta a ponta + 5 unitários (`npm test`) |
 
-Documentação: [ARTIGO.md](ARTIGO.md) (artigo técnico) · [APRESENTACAO_5MIN.md](APRESENTACAO_5MIN.md) (roteiro) · [DEPLOY.md](DEPLOY.md) (publicação).
+Documentação: **[artigo em PDF](entrega/Artigo_LojaTech.pdf)** e [Word](entrega/Artigo_LojaTech.docx) (gerados de [ARTIGO.md](ARTIGO.md) com `npm run artigo`) · [APRESENTACAO_5MIN.md](APRESENTACAO_5MIN.md) (roteiro) · [DEPLOY.md](DEPLOY.md) (publicação).
 
 ## Preparar a apresentação (Windows, um comando)
 

@@ -1,25 +1,23 @@
 # LojaTech: regras de negócio, integridade e segurança implementadas no SGBD MySQL em um sistema de vendas e estoque
 
-**Autores:** [Nome 1], [Nome 2], [Nome 3]
-**Curso:** [Curso] — Universidade Católica de Brasília (UCB) · Disciplina: [Banco de Dados] · Prof.: [Nome]
+**Autores:** Fellipe Timbó Martins Rodrigues; Lucas Barcelos; Ângelo Prado
+**Curso:** Engenharia de Software — Universidade Católica de Brasília (UCB)
+**Disciplina:** Laboratório de Banco de Dados (GPE17N40158) · **Professor:** Jefferson Salomão Rodrigues
 **Repositório:** https://github.com/FelpTec/lojatech
 
 ---
 
 ## Resumo
 
-Este trabalho apresenta o LojaTech, uma aplicação web de gestão de vendas e estoque cujo núcleo de regras de negócio está implementado no próprio Sistema Gerenciador de Banco de Dados (SGBD) MySQL 8. O projeto usa, de forma integrada, os principais recursos do SGBD:
-- tabelas normalizadas com restrições de integridade (PK, FK, UNIQUE, CHECK);
-- índices escolhidos a partir das consultas reais;
-- seis triggers, seis views, nove functions e cinco stored procedures;
-- controle transacional explícito (COMMIT, ROLLBACK e SAVEPOINT);
-- geração própria de identificadores para dados críticos;
-- controle de acesso por *roles*, com o princípio do menor privilégio;
-- como recurso extra, um banco **NoSQL (MongoDB)** para fichas técnicas de esquema flexível e para o log de eventos.
+Este artigo apresenta o LojaTech, uma aplicação web de gestão de vendas e estoque cujas regras de negócio estão implementadas no próprio Sistema Gerenciador de Banco de Dados (SGBD) MySQL 8. O objetivo é demonstrar o uso integrado dos principais recursos de um SGBD relacional: tabelas normalizadas com restrições de integridade, índices justificados por meio do plano de execução, seis *triggers*, seis *views*, nove *functions* e cinco *stored procedures*, controle transacional explícito, geração própria de identificadores para dados críticos e controle de acesso por *roles* segundo o princípio do menor privilégio. Como recurso adicional, foi integrado o banco NoSQL MongoDB para armazenar fichas técnicas de esquema flexível e o registro de eventos da aplicação. A metodologia envolveu modelagem, implementação de scripts reexecutáveis, desenvolvimento da interface e verificação por 31 testes automatizados, 26 deles de ponta a ponta. A aplicação (Node.js e HTML/CSS/JavaScript) acessa o banco por uma conta sem privilégio de escrita direta em tabelas, de modo que toda alteração passa por *procedures*. Os resultados mostram que concentrar as regras no SGBD garante atomicidade, consistência sob concorrência, auditoria automática e segurança verificável, inclusive diante de acessos feitos fora da aplicação.
 
-A aplicação (Node.js/Express com HTML/CSS/JS) acessa o banco exclusivamente por uma conta sem nenhum privilégio de escrita direta em tabelas: toda alteração passa por *procedures*. Os resultados mostram que concentrar as regras no SGBD garante consistência mesmo diante de acessos concorrentes ou fora da aplicação. Isso foi verificado por 31 testes automatizados, 26 deles de ponta a ponta.
+**Palavras-chave:** MySQL; MongoDB; persistência poliglota; *stored procedures*; controle de acesso.
 
-**Palavras-chave:** MySQL; MongoDB; persistência poliglota; stored procedures; triggers; transações; controle de acesso.
+## Abstract
+
+This paper presents LojaTech, a web application for sales and inventory management whose business rules are implemented inside the MySQL 8 Database Management System (DBMS). The goal is to demonstrate the integrated use of the main features of a relational DBMS: normalized tables with integrity constraints, indexes justified through execution plans, six triggers, six views, nine functions and five stored procedures, explicit transaction control, custom identifier generation for critical data, and role-based access control following the principle of least privilege. As an additional feature, the NoSQL database MongoDB was integrated to store flexible-schema product specifications and the application event log. The methodology comprised modeling, implementation of re-runnable scripts, interface development and verification through 31 automated tests, 26 of them end-to-end. The application (Node.js and HTML/CSS/JavaScript) accesses the database through an account with no direct write privileges on tables, so every change goes through stored procedures. The results show that centralizing rules in the DBMS ensures atomicity, consistency under concurrency, automatic auditing and verifiable security, even for accesses made outside the application.
+
+**Keywords:** MySQL; MongoDB; polyglot persistence; stored procedures; access control.
 
 ## 1. Introdução
 
@@ -29,7 +27,7 @@ Pequenos comércios dependem de dados de vendas e estoque corretos. Os erros mai
 - alteração de preço sem rastro;
 - um funcionário com acesso indevido a dados pessoais de clientes.
 
-Quando essas regras ficam apenas no código da aplicação, qualquer acesso que não passe por ela as ignora: um script, outro sistema ou um erro de programação.
+Quando essas regras ficam apenas no código da aplicação, qualquer acesso que não passe por ela as ignora: um script, outro sistema ou um erro de programação. Já as restrições declaradas no esquema são garantidas pelo próprio SGBD para todos os programas que acessam o banco (ELMASRI; NAVATHE, 2018).
 
 O LojaTech adota a abordagem oposta: **o banco de dados é o guardião das regras**. A aplicação web é uma camada de apresentação e validação de entrada. Integridade, atomicidade, auditoria e autorização são garantidas pelo MySQL.
 
@@ -68,6 +66,8 @@ O ambiente é reproduzível com Docker Compose (MySQL 8.4 + MongoDB 8 + API), e 
 
 ### 4.1 Funcionalidades
 
+**Quadro 1** – Funcionalidades e recursos de banco utilizados
+
 | Funcionalidade | Recurso de banco utilizado |
 |---|---|
 | Login de funcionários | `fn_autenticar` (a aplicação não lê `senha_hash`) |
@@ -81,30 +81,46 @@ O ambiente é reproduzível com Docker Compose (MySQL 8.4 + MongoDB 8 + API), e 
 | Equipe e permissões por grupo | `vw_usuarios_publico`, `grupos_usuarios`, `fn_tem_permissao` |
 | Tela "Segurança do BD" | `CURRENT_USER()`, `SHOW GRANTS` e tentativas proibidas executadas ao vivo |
 
+Fonte: elaborado pelos autores (2026).
+
 Há três perfis (`grupos_usuarios`):
 - **Administrador:** tudo;
 - **Vendedor:** vende e cadastra clientes;
 - **Consulta:** somente leitura.
 
+Cada tela da interface informa a origem dos dados exibidos (TABELA, VIEW, PROCEDURE ou MONGODB), o que facilita relacionar a aplicação aos objetos do banco (Figura 1).
+
+**Figura 1** – Painel inicial da aplicação, alimentado pelas views `vw_painel`, `vw_resumo_pedidos` e `vw_estoque_baixo`
+
+![Painel](docs/telas/painel.png)
+
+Fonte: elaborado pelos autores (2026).
+
 ### 4.2 Tecnologias e justificativas
+
+**Quadro 2** – Tecnologias utilizadas e justificativas
 
 | Tecnologia | Justificativa |
 |---|---|
-| **MySQL 8.4 (LTS)** | SGBD exigido. A versão 8 traz CHECK efetivo, *roles*, `JSON_TABLE` (usado para receber o carrinho), `REGEXP_REPLACE` e `EXPLAIN ANALYZE`. |
-| **Node.js 22 + Express** | API leve, mesma linguagem do frontend (o módulo de validação é compartilhado), ecossistema maduro. |
-| **mysql2** | Pool de conexões, *prepared statements* (evitam SQL Injection) e suporte a procedures com parâmetros OUT. |
+| **MySQL 8.4 (LTS)** | SGBD exigido. A versão 8 traz CHECK efetivo, *roles*, `JSON_TABLE` (usado para receber o carrinho), `REGEXP_REPLACE` e `EXPLAIN ANALYZE` (ORACLE, 2024a). |
+| **Node.js 22 + Express** | API leve, mesma linguagem do frontend (o módulo de validação é compartilhado), ecossistema maduro (OPENJS FOUNDATION, 2024). |
+| **mysql2** | Pool de conexões, *prepared statements*, que evitam SQL Injection (OWASP FOUNDATION, 2024), e suporte a procedures com parâmetros OUT. |
 | **HTML, CSS e JavaScript puros** | O foco é o banco. Sem framework, a interface fica leve, sem etapa de build e fácil de explicar. A identidade visual segue a da UCB (azul `#27348B`, ciano `#0095D9`, fonte Source Sans 3). |
 | **MongoDB 8 + driver oficial `mongodb`** | Banco de documentos para os dados de esquema flexível e alto volume (seção 6). Oferece validação `$jsonSchema`, índices curinga e TTL, *aggregation pipeline* e controle de acesso por roles. |
 | **Docker Compose** | Sobe banco e API idênticos em qualquer máquina com um comando; os scripts de instalação rodam automaticamente. |
 | **node:test** | Executor de testes nativo do Node, sem dependências extras. |
 
+Fonte: elaborado pelos autores (2026).
+
 ## 5. Modelagem do banco de dados
 
 ### 5.1 Diagrama Entidade-Relacionamento
 
+**Figura 2** – Diagrama Entidade-Relacionamento (DER) do LojaTech
+
 ![DER do LojaTech](docs/der.png)
 
-*Figura 1 — DER (fonte editável em `docs/der.mmd`; versão vetorial em `docs/der.svg`).*
+Fonte: elaborado pelos autores (2026). Versão editável em `docs/der.mmd` e vetorial em `docs/der.svg`.
 
 ### 5.2 Entidades e relacionamentos
 
@@ -130,6 +146,8 @@ Essas regras valem para **qualquer** cliente SQL, não só para a aplicação.
 
 ### 5.4 Geração de identificadores
 
+**Quadro 3** – Estratégia de geração de identificadores por tabela
+
 | Tabela | ID | Justificativa |
 |---|---|---|
 | `pedidos` | `PED-AAAA-NNNNNN` via `fn_gerar_id_pedido()` | Documento de venda (dado crítico): legível, impresso para o cliente, sequencial por ano e **sem lacunas**. |
@@ -139,6 +157,8 @@ Essas regras valem para **qualquer** cliente SQL, não só para a aplicação.
 | `produtos` | AUTO_INCREMENT | Catálogo interno; o ID nunca é digitado nem impresso. A integridade dos valores é garantida por CHECKs e pelo histórico de preços. |
 | `itens_pedido` | AUTO_INCREMENT | Linha subordinada ao pedido; a identidade de negócio é `(pedido_id, produto_id)`. |
 | `log_estoque`, `historico_precos` | AUTO_INCREMENT | Logs append-only de alto volume, em que a ordem de inserção é exatamente o que se registra. |
+
+Fonte: elaborado pelos autores (2026).
 
 **Funcionamento:**
 - Todas as funções de ID usam `fn_proximo_valor(serie)`, que faz um *upsert* em `sequencias`. A linha da série fica **bloqueada até o fim da transação**, então duas vendas simultâneas nunca recebem o mesmo número.
@@ -150,6 +170,8 @@ Essas regras valem para **qualquer** cliente SQL, não só para a aplicação.
 
 PKs, UNIQUEs e FKs já criam índices automaticamente. Os índices adicionais vieram das consultas da aplicação. Os compostos começam pela coluna de FK e por isso **substituem** o índice que o InnoDB criaria só para a FK, sem duplicidade.
 
+**Quadro 4** – Índices criados e efeito observado no `EXPLAIN`
+
 | Índice | Consulta atendida | Resultado no `EXPLAIN` |
 |---|---|---|
 | `idx_pedidos_data (data_pedido)` | Lista de pedidos `ORDER BY data_pedido DESC` e filtros "hoje" e "mês" do painel | `index`/`range` com *Backward index scan*, sem *filesort* |
@@ -159,11 +181,15 @@ PKs, UNIQUEs e FKs já criam índices automaticamente. Os índices adicionais vi
 | `idx_hist_produto_data (produto_id, alterado_em)` | Histórico de preços de um produto | `ref` |
 | `uq_usuarios_email` (UNIQUE) | Login por e-mail | `const` (no máximo 1 linha) |
 
+Fonte: elaborado pelos autores (2026).
+
 **Impacto esperado:** as consultas passam de varredura completa, O(n), para busca em árvore B+, O(log n). Os índices de cobertura também evitam acessar a tabela.
 
 **Custo:** cada índice torna INSERT e UPDATE um pouco mais lentos. Por isso não indexamos colunas de baixa seletividade (como `ativo`) nem a comparação `estoque <= estoque_minimo`, que compara duas colunas e não aproveitaria índice.
 
 ### 5.6 Triggers
+
+**Quadro 5** – Triggers implementados
 
 | Trigger | Evento | Função e justificativa |
 |---|---|---|
@@ -173,16 +199,22 @@ PKs, UNIQUEs e FKs já criam índices automaticamente. Os índices adicionais vi
 | `trg_itens_bu_bloqueia` / `trg_itens_bd_bloqueia` | BEFORE UPDATE / BEFORE DELETE `itens_pedido` | Tornam os itens imutáveis. Alterar ou remover um item sem estornar o estoque deixaria estoque e log inconsistentes. |
 | `trg_produtos_au_historico_preco` | AFTER UPDATE `produtos` | Registra preço anterior e novo, o usuário e a conta MySQL. É uma trilha de auditoria impossível de "esquecer". |
 
+Fonte: elaborado pelos autores (2026).
+
 ### 5.7 Views
+
+**Quadro 6** – Views implementadas
 
 | View | Finalidade | Usada em |
 |---|---|---|
 | `vw_vendas_detalhadas` | Junta 5 tabelas (pedido, cliente, vendedor, item, produto) e esconde a complexidade dos JOINs | Detalhe do pedido |
 | `vw_resumo_pedidos` | Um registro por pedido, com quantidade de itens e total | Tela de pedidos e painel |
 | `vw_estoque_baixo` | Produtos ativos no limite mínimo, com sugestão de reposição | Alerta, contador do menu e painel |
-| `vw_clientes` | Clientes com **CPF mascarado** (`***.982.247-**`) | Tela de clientes. A aplicação não tem SELECT na tabela, só na view (LGPD) |
+| `vw_clientes` | Clientes com **CPF mascarado** (`***.982.247-**`) | Tela de clientes. A aplicação não tem SELECT na tabela, só na view, em linha com a LGPD (BRASIL, 2018) |
 | `vw_usuarios_publico` | Usuários **sem as colunas de senha**, com grupo e permissões | Sessão e tela de equipe |
 | `vw_painel` | Indicadores consolidados (faturamento do dia e do mês, pedidos, estoque baixo, clientes) | Painel |
+
+Fonte: elaborado pelos autores (2026).
 
 As views servem a dois propósitos:
 - **simplificação:** a API faz um `SELECT` simples;
@@ -190,7 +222,7 @@ As views servem a dois propósitos:
 
 ### 5.8 Functions e procedures
 
-**Functions**
+**Quadro 7** – Functions implementadas
 
 | Rotina | Uso |
 |---|---|
@@ -202,7 +234,9 @@ As views servem a dois propósitos:
 | `fn_tem_permissao` | Lê as permissões do grupo do usuário |
 | `fn_total_pedido` | Soma dos itens de um pedido |
 
-**Procedures** (todas as escritas da aplicação)
+Fonte: elaborado pelos autores (2026).
+
+**Quadro 8** – Stored procedures implementadas (todas as escritas da aplicação)
 
 | Rotina | Uso |
 |---|---|
@@ -212,6 +246,8 @@ As views servem a dois propósitos:
 | `sp_cadastrar_cliente` | Valida nome, CPF, e-mail, telefone e duplicidade; gera o ID via trigger |
 | `sp_cadastrar_usuario` | Uso exclusivo do DBA (não concedida à aplicação). Gera o salt com `RANDOM_BYTES` |
 
+Fonte: elaborado pelos autores (2026).
+
 **Benefícios:**
 - a regra fica num único lugar;
 - há uma ida e volta à rede por operação;
@@ -220,7 +256,7 @@ As views servem a dois propósitos:
 
 ### 5.9 Controle de transações (TCL)
 
-Uma venda envolve várias escritas que precisam ocorrer juntas ou nenhuma (atomicidade, o "A" de ACID):
+Uma venda envolve várias escritas que precisam ocorrer juntas ou nenhuma, a propriedade de atomicidade do modelo ACID (SILBERSCHATZ; KORTH; SUDARSHAN, 2020):
 - incrementar a sequência de pedidos;
 - inserir o pedido;
 - inserir N itens;
@@ -229,7 +265,7 @@ Uma venda envolve várias escritas que precisam ocorrer juntas ou nenhuma (atomi
 
 Na `sp_registrar_venda`:
 - um `DECLARE EXIT HANDLER FOR SQLEXCEPTION` faz `ROLLBACK` e `RESIGNAL` em qualquer falha. Por exemplo, se o 2º item do carrinho não tiver estoque, o 1º item, o pedido, a baixa e o número da sequência são desfeitos;
-- o `SELECT … FOR UPDATE` bloqueia a linha do produto até o COMMIT. Duas vendas simultâneas da última unidade são serializadas: a segunda vê o estoque já baixado e recebe "Estoque insuficiente";
+- o `SELECT … FOR UPDATE` bloqueia a linha do produto até o COMMIT (ORACLE, 2024c). Duas vendas simultâneas da última unidade são serializadas: a segunda vê o estoque já baixado e recebe "Estoque insuficiente";
 - a ordem de bloqueio é sempre a mesma (sequência, depois produtos), o que evita *deadlock* entre vendas.
 
 O script `db/demo/01_transacoes_tcl.sql` demonstra:
@@ -243,7 +279,9 @@ A procedure é **dona da transação** e deve ser chamada em modo *autocommit*: 
 
 ### 5.10 Usuários e controle de acesso
 
-A estratégia é **menor privilégio com roles**. O `root` só é usado na instalação; nenhuma conta da aplicação tem INSERT, UPDATE, DELETE ou DDL em tabelas.
+A estratégia é **menor privilégio com roles** (ORACLE, 2024b). O `root` só é usado na instalação; nenhuma conta da aplicação tem INSERT, UPDATE, DELETE ou DDL em tabelas.
+
+**Quadro 9** – Roles do MySQL
 
 | Role | Privilégios |
 |---|---|
@@ -251,16 +289,28 @@ A estratégia é **menor privilégio com roles**. O `root` só é usado na insta
 | `r_lojatech_operacao` | SELECT em `produtos`, `categorias` e `vw_usuarios_publico`; EXECUTE nas 4 procedures operacionais e em 3 functions |
 | `r_lojatech_admin` | ALL PRIVILEGES **apenas** no schema `lojatech` |
 
+Fonte: elaborado pelos autores (2026).
+
+**Quadro 10** – Contas de acesso ao banco
+
 | Conta | Roles | Justificativa |
 |---|---|---|
 | `lojatech_app` | leitura + operação, até 20 conexões | Usada pela API. Se for comprometida, não consegue ler senhas nem CPFs, nem alterar dados fora das regras |
 | `lojatech_relatorio` | leitura, até 5 conexões | Ferramentas de BI e relatórios, só views |
 | `lojatech_dba` | admin | Manutenção e demonstrações, substituindo o root sem acesso a outros bancos |
 
+Fonte: elaborado pelos autores (2026).
+
 **Evidências:**
 - A tela "Segurança do BD" mostra `CURRENT_USER()` = `lojatech_app@%`, as roles ativas e o `SHOW GRANTS`.
 - A mesma tela executa ao vivo seis operações proibidas, todas **negadas pelo MySQL** (ERROR 1142/1370): ler `senha_hash`, ler CPF completo, UPDATE de preço, DELETE de pedidos, CREATE TABLE e criar usuário.
 - O servidor se recusa a iniciar se configurado com `DB_USER=root`.
+
+**Figura 3** – Tela "Segurança do BD": conta e roles em uso, privilégios concedidos e operações proibidas negadas pelo MySQL
+
+![Segurança do BD](docs/telas/seguranca.png)
+
+Fonte: elaborado pelos autores (2026).
 
 Há duas camadas de autorização:
 1. o MySQL limita **o que a aplicação pode fazer**;
@@ -279,16 +329,28 @@ Erros de regra de negócio (SQLSTATE 45000) são exibidos ao usuário. Os demais
 
 ### 6.1 Por que um banco NoSQL neste sistema
 
-A loja tem dois tipos de dado em que o modelo relacional **não agrega garantias e cobra um custo de modelagem**. Para eles, adotamos **persistência poliglota**: cada dado vai para o banco cujo modelo combina com ele.
+A loja tem dois tipos de dado em que o modelo relacional **não agrega garantias e cobra um custo de modelagem**. Para eles, adotamos **persistência poliglota**: cada dado vai para o banco cujo modelo combina com ele (SADALAGE; FOWLER, 2013).
+
+**Quadro 11** – Dados armazenados no MongoDB e justificativa
 
 | Dado | Problema no relacional | Solução no MongoDB |
 |---|---|---|
 | **Fichas técnicas** dos produtos | Cada categoria tem atributos próprios: mouse tem DPI e botões; monitor tem polegadas, painel e Hz; SSD tem interface e MB/s. Há duas saídas no relacional. Uma coluna por atributo daria dezenas de colunas quase sempre nulas e um `ALTER TABLE` a cada categoria nova. O modelo EAV (entidade-atributo-valor) perde tipos, exige um *self-join* por atributo e não indexa bem. | Coleção `fichas_tecnicas`: um documento por produto, com um objeto `atributos` de chaves livres. A **validação `$jsonSchema`** limita formato e tipos, e o **índice curinga** `atributos.$**` permite buscar por *qualquer* atributo com IXSCAN. |
 | **Log de eventos** da aplicação | Volume alto e crescente, formato que varia por tipo (venda, login, recusa…), nenhuma necessidade de transação ou JOIN. Exigiria rotina de expurgo e disputaria recursos com as vendas. | Coleção `eventos`: escrita rápida com formato flexível. O **índice TTL** apaga automaticamente o que tem mais de 90 dias, e o **aggregation pipeline** (`$match`, `$group`, `$dateTrunc`) gera o painel de atividade. |
 
-**O que continua no MySQL** é tudo o que exige ACID: preço, estoque, pedidos, clientes e usuários. A ficha usa como `_id` o mesmo `id` do produto no MySQL. Ao salvar, a API confere que o produto existe e copia a categoria **do MySQL**, a fonte da verdade.
+Fonte: elaborado pelos autores (2026).
+
+**O que continua no MySQL** é tudo o que exige ACID: preço, estoque, pedidos, clientes e usuários. A ficha usa como `_id` o mesmo `id` do produto no MySQL. Ao salvar, a API confere que o produto existe e copia a categoria **do MySQL**, a fonte da verdade. A Figura 4 mostra a tela que reúne esses recursos.
+
+**Figura 4** – Tela "NoSQL · MongoDB": busca por atributo com índice curinga e junção com preço e estoque do MySQL
+
+![NoSQL](docs/telas/nosql.png)
+
+Fonte: elaborado pelos autores (2026).
 
 ### 6.2 Modelo dos documentos
+
+**Quadro 12** – Exemplos de documentos das coleções `fichas_tecnicas` e `eventos`
 
 ```json
 // fichas_tecnicas — Monitor 27"
@@ -306,11 +368,17 @@ A loja tem dois tipos de dado em que o modelo relacional **não agrega garantias
              "itens": [{ "produto": 8, "quantidade": 1 }] } }
 ```
 
+Fonte: elaborado pelos autores (2026).
+
 Os 11 tipos de evento são: login (sucesso, falha, bloqueado), venda (registrada, recusada), cliente (cadastrado, recusado), reposição, alteração de preço, ficha atualizada e acesso negado.
 
 Por LGPD, o log **não** guarda CPF nem e-mail de clientes. Em tentativas de login, o e-mail digitado é gravado mascarado (`v***@lojatech.com`), e o IP é armazenado anonimizado (último octeto zerado).
 
 ### 6.3 Recursos do MongoDB utilizados
+
+Os recursos a seguir seguem a documentação oficial do MongoDB (MONGODB, 2024).
+
+**Quadro 13** – Recursos do MongoDB utilizados
 
 | Recurso | Uso |
 |---|---|
@@ -320,6 +388,8 @@ Por LGPD, o log **não** guarda CPF nem e-mail de clientes. Em tentativas de log
 | Índices compostos `{tipo, quando}` e `{usuario.id, quando}` | Painel por tipo e auditoria por funcionário |
 | Aggregation pipeline | Eventos por tipo e por hora (`$dateTrunc` no fuso de Brasília), vendas por vendedor (`$group` com `$sum`) e lista de atributos existentes (`$objectToArray` + `$unwind`) |
 | `explain('executionStats')` | Mostrado na tela, para provar o uso do índice |
+
+Fonte: elaborado pelos autores (2026).
 
 ### 6.4 Segurança
 
@@ -362,13 +432,22 @@ A conta da aplicação não consegue ler senhas, CPFs nem alterar tabelas direta
 
 ## Referências
 
-- MONGODB, INC. *MongoDB Manual: Schema Validation, Wildcard Indexes, TTL Indexes, Aggregation Pipeline, Role-Based Access Control*. Disponível em: https://www.mongodb.com/docs/manual/.
-- SADALAGE, P. J.; FOWLER, M. *NoSQL Essencial: um guia conciso para o mundo emergente da persistência poliglota*. São Paulo: Novatec, 2013.
-- ORACLE. *MySQL 8.4 Reference Manual*. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/. Acesso em: nov. 2026.
-- ORACLE. *MySQL 8.4 Reference Manual — Using Roles*. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/roles.html.
-- ORACLE. *MySQL 8.4 Reference Manual — InnoDB Locking Reads (SELECT … FOR UPDATE)*. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html.
-- ELMASRI, R.; NAVATHE, S. B. *Sistemas de Banco de Dados*. 7. ed. São Paulo: Pearson, 2018.
-- SILBERSCHATZ, A.; KORTH, H. F.; SUDARSHAN, S. *Sistema de Banco de Dados*. 7. ed. Rio de Janeiro: GEN LTC, 2020.
-- BRASIL. *Lei nº 13.709, de 14 de agosto de 2018 (LGPD)*.
-- OPENJS FOUNDATION. *Express 4.x API Reference*. Disponível em: https://expressjs.com/.
-- OWASP. *SQL Injection Prevention Cheat Sheet*. Disponível em: https://cheatsheetseries.owasp.org/.
+BRASIL. **Lei nº 13.709, de 14 de agosto de 2018**. Lei Geral de Proteção de Dados Pessoais (LGPD). Brasília, DF: Presidência da República, 2018. Disponível em: https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709.htm. Acesso em: 15 nov. 2026.
+
+ELMASRI, R.; NAVATHE, S. B. **Sistemas de banco de dados**. 7. ed. São Paulo: Pearson, 2018.
+
+MONGODB. **MongoDB Manual**: version 8.0. New York: MongoDB, 2024. Disponível em: https://www.mongodb.com/docs/manual/. Acesso em: 15 nov. 2026.
+
+OPENJS FOUNDATION. **Express 4.x**: API reference. [*S. l.*]: OpenJS Foundation, 2024. Disponível em: https://expressjs.com/en/4x/api.html. Acesso em: 15 nov. 2026.
+
+ORACLE. **MySQL 8.4 Reference Manual**. Austin: Oracle, 2024a. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/. Acesso em: 15 nov. 2026.
+
+ORACLE. **MySQL 8.4 Reference Manual**: using roles. Austin: Oracle, 2024b. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/roles.html. Acesso em: 15 nov. 2026.
+
+ORACLE. **MySQL 8.4 Reference Manual**: locking reads. Austin: Oracle, 2024c. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html. Acesso em: 15 nov. 2026.
+
+OWASP FOUNDATION. **SQL Injection Prevention Cheat Sheet**. [*S. l.*]: OWASP Foundation, 2024. Disponível em: https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html. Acesso em: 15 nov. 2026.
+
+SADALAGE, P. J.; FOWLER, M. **NoSQL essencial**: um guia conciso para o mundo emergente da persistência poliglota. São Paulo: Novatec, 2013.
+
+SILBERSCHATZ, A.; KORTH, H. F.; SUDARSHAN, S. **Sistema de banco de dados**. 7. ed. Rio de Janeiro: GEN LTC, 2020.
