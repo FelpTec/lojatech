@@ -1,0 +1,42 @@
+# Sobe o ambiente completo: MySQL 8.4 (instalado pelos scripts de db/init) + API.
+#   docker compose up -d --build        → http://localhost:3000
+#   docker compose --profile tunel up   → também gera um link público temporário (Cloudflare)
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-troque-esta-senha-root}   # só a instalação usa
+      TZ: America/Sao_Paulo
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - ./db/demo:/demo:ro
+      - dados_mysql:/var/lib/mysql
+    ports:
+      - "3307:3306"            # acesso pelo Workbench em localhost:3307
+    healthcheck:   # pronto só depois dos scripts de init (TCP só abre no servidor definitivo)
+      test: ["CMD-SHELL", "mysql -h127.0.0.1 -ulojatech_relatorio -pRelatorio@Senha2026! -e 'SELECT 1 FROM lojatech.vw_painel' >/dev/null 2>&1"]
+      interval: 5s
+      retries: 60
+  app:
+    build: .
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: lojatech_app                 # conta de menor privilégio — nunca root
+      DB_PASS: ${DB_PASS:-App@Senha2026!}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-troque-em-producao-1f8e6c2a}
+      TZ: America/Sao_Paulo
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+  tunel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunel"]
+    command: tunnel --no-autoupdate --url http://app:3000
+    depends_on: [app]
+
+volumes:
+  dados_mysql:

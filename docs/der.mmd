@@ -1,0 +1,90 @@
+erDiagram
+  grupos_usuarios ||--o{ usuarios : "agrupa"
+  usuarios ||--o{ pedidos : "registra"
+  usuarios ||--o{ clientes : "cadastra"
+  clientes ||--o{ pedidos : "faz"
+  pedidos ||--|{ itens_pedido : "contém"
+  produtos ||--o{ itens_pedido : "vendido em"
+  categorias ||--o{ produtos : "classifica"
+  produtos ||--o{ log_estoque : "movimenta"
+  produtos ||--o{ historico_precos : "tem"
+  usuarios |o--o{ log_estoque : "origina"
+  usuarios |o--o{ historico_precos : "altera"
+
+  grupos_usuarios {
+    TINYINT id PK "AUTO_INCREMENT (domínio)"
+    VARCHAR nome UK
+    VARCHAR descricao
+    BOOLEAN pode_vender
+    BOOLEAN pode_gerenciar_estoque
+    BOOLEAN pode_cadastrar_clientes
+  }
+  usuarios {
+    CHAR id PK "USR-00001 (fn_gerar_id_usuario)"
+    VARCHAR nome
+    VARCHAR email UK
+    CHAR senha_salt
+    CHAR senha_hash
+    TINYINT grupo_id FK
+    BOOLEAN ativo
+    DATETIME criado_em
+    DATETIME ultimo_login
+  }
+  clientes {
+    CHAR id PK "CLI-000001 (fn_gerar_id_cliente)"
+    VARCHAR nome
+    CHAR cpf UK
+    VARCHAR email UK
+    VARCHAR telefone
+    DATETIME criado_em
+    CHAR criado_por FK
+  }
+  categorias {
+    SMALLINT id PK "AUTO_INCREMENT (domínio)"
+    VARCHAR nome UK
+  }
+  produtos {
+    INT id PK "AUTO_INCREMENT (catálogo)"
+    VARCHAR nome
+    SMALLINT categoria_id FK
+    DECIMAL preco
+    INT estoque
+    INT estoque_minimo
+    BOOLEAN ativo
+  }
+  pedidos {
+    CHAR id PK "PED-AAAA-NNNNNN (fn_gerar_id_pedido)"
+    CHAR cliente_id FK
+    CHAR usuario_id FK
+    DATETIME data_pedido
+  }
+  itens_pedido {
+    INT id PK
+    CHAR pedido_id FK
+    INT produto_id FK
+    INT quantidade
+    DECIMAL preco_unitario
+  }
+  log_estoque {
+    BIGINT id PK
+    INT produto_id FK
+    INT variacao
+    INT estoque_resultante
+    VARCHAR motivo
+    CHAR usuario_id FK
+    VARCHAR conta_bd
+    DATETIME data_log
+  }
+  historico_precos {
+    BIGINT id PK
+    INT produto_id FK
+    DECIMAL preco_anterior
+    DECIMAL preco_novo
+    CHAR usuario_id FK
+    VARCHAR conta_bd
+    DATETIME alterado_em
+  }
+  sequencias {
+    VARCHAR nome PK "USR, CLI, PED-2026"
+    INT ultimo_valor
+  }
