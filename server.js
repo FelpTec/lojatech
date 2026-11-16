@@ -122,22 +122,31 @@ const autenticar = rota(async (req, _res, next) => {
 const exigirPermissao = (flag, texto) => (req, _res, next) =>
   next(req.usuario[flag] ? undefined : new ErroHttp(403, `Seu perfil não pode ${texto}`));
 
-// Limite de tentativas de login por IP E por e-mail (5 erros → 1 minuto).
-// Por e-mail, trocar de IP não permite atacar a mesma conta.
+// Limite de tentativas de login (5 erros → 1 minuto) por IP e pelo par IP+e-mail.
+// Não bloqueamos só pelo e-mail: um terceiro poderia trancar a conta de
+// outra pessoa errando a senha dela de propósito.
 const tentativas = new Map();
-const chavesLogin = (ip, email) => [`ip:${ip}`, `email:${String(email).trim().toLowerCase()}`];
+const LIMITE_MAPA = 10000;
+const chavesLogin = (ip, email) => [`ip:${ip}`, `ip-email:${ip}|${String(email).trim().toLowerCase()}`];
 function checarLimiteLogin(chaves) {
   if (chaves.some((k) => (tentativas.get(k)?.bloqueadoAte || 0) > Date.now())) {
     throw new ErroHttp(429, 'Muitas tentativas. Aguarde 1 minuto.');
   }
 }
+function limparMapa() {
+  const agora = Date.now();
+  for (const [k, t] of tentativas) if (t.bloqueadoAte < agora && t.ultimo < agora - 10 * 60e3) tentativas.delete(k);
+  // Ainda cheio: descarta os mais antigos (Map mantém ordem de inserção), nunca todos de uma vez
+  for (const k of tentativas.keys()) { if (tentativas.size <= LIMITE_MAPA) break; tentativas.delete(k); }
+}
 function registrarFalha(chaves) {
-  if (tentativas.size > 10000) tentativas.clear();           // teto de memória
+  if (tentativas.size >= LIMITE_MAPA) limparMapa();
   for (const k of chaves) {
-    const t = tentativas.get(k) || { falhas: 0, bloqueadoAte: 0 };
+    const t = tentativas.get(k) || { falhas: 0, bloqueadoAte: 0, ultimo: 0 };
     t.falhas += 1;
+    t.ultimo = Date.now();
     if (t.falhas >= 5) { t.falhas = 0; t.bloqueadoAte = Date.now() + 60e3; }
-    tentativas.set(k, t);
+    tentativas.delete(k); tentativas.set(k, t);              // reinsere: vira o mais recente
   }
 }
 
