@@ -10,7 +10,7 @@ Expõe o ambiente local por um túnel da Cloudflare:
 
 ```bash
 docker compose up -d --build
-docker compose --profile tunel up -d
+TRUST_PROXY=1 docker compose --profile tunel up -d
 docker compose logs tunel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com'
 ```
 

@@ -38,7 +38,7 @@ O MySQL fica exposto em `localhost:3307`, para uso no Workbench com `lojatech_db
 ### Link público temporário para testes
 
 ```bash
-docker compose --profile tunel up -d
+TRUST_PROXY=1 docker compose --profile tunel up -d
 docker compose logs tunel | grep trycloudflare.com    # copie o link https://….trycloudflare.com
 ```
 

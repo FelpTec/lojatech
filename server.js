@@ -122,17 +122,23 @@ const autenticar = rota(async (req, _res, next) => {
 const exigirPermissao = (flag, texto) => (req, _res, next) =>
   next(req.usuario[flag] ? undefined : new ErroHttp(403, `Seu perfil não pode ${texto}`));
 
-// Limite simples de tentativas de login por IP (5 erros → 1 minuto)
+// Limite de tentativas de login por IP E por e-mail (5 erros → 1 minuto).
+// Por e-mail, trocar de IP não permite atacar a mesma conta.
 const tentativas = new Map();
-function checarLimiteLogin(ip) {
-  const t = tentativas.get(ip);
-  if (t && t.bloqueadoAte > Date.now()) throw new ErroHttp(429, 'Muitas tentativas. Aguarde 1 minuto.');
+const chavesLogin = (ip, email) => [`ip:${ip}`, `email:${String(email).trim().toLowerCase()}`];
+function checarLimiteLogin(chaves) {
+  if (chaves.some((k) => (tentativas.get(k)?.bloqueadoAte || 0) > Date.now())) {
+    throw new ErroHttp(429, 'Muitas tentativas. Aguarde 1 minuto.');
+  }
 }
-function registrarFalha(ip) {
-  const t = tentativas.get(ip) || { falhas: 0, bloqueadoAte: 0 };
-  t.falhas += 1;
-  if (t.falhas >= 5) { t.falhas = 0; t.bloqueadoAte = Date.now() + 60e3; }
-  tentativas.set(ip, t);
+function registrarFalha(chaves) {
+  if (tentativas.size > 10000) tentativas.clear();           // teto de memória
+  for (const k of chaves) {
+    const t = tentativas.get(k) || { falhas: 0, bloqueadoAte: 0 };
+    t.falhas += 1;
+    if (t.falhas >= 5) { t.falhas = 0; t.bloqueadoAte = Date.now() + 60e3; }
+    tentativas.set(k, t);
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -140,7 +146,8 @@ function registrarFalha(ip) {
 // ---------------------------------------------------------------------
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// Só confia em X-Forwarded-For quando há proxy conhecido na frente (senão o IP seria forjável)
+if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
 app.use(express.json({ limit: '20kb' }));
 app.use((_req, res, next) => {
   res.set({
@@ -161,15 +168,16 @@ app.get('/api/saude', rota(async (_req, res) => {
 }));
 
 app.post('/api/login', rota(async (req, res) => {
-  checarLimiteLogin(req.ip);
   const { email, senha } = req.body || {};
   exigirValido(V.validarLogin({ email, senha }));
+  const chaves = chavesLogin(req.ip, email);
+  checarLimiteLogin(chaves);
   const [[r]] = await pool.query('SELECT fn_autenticar(?, ?) AS id', [email.trim(), senha]);
   if (!r.id) {
-    registrarFalha(req.ip);
+    registrarFalha(chaves);
     throw new ErroHttp(401, 'E-mail ou senha incorretos');
   }
-  tentativas.delete(req.ip);
+  chaves.forEach((k) => tentativas.delete(k));
   const [[u]] = await pool.query('SELECT * FROM vw_usuarios_publico WHERE id = ?', [r.id]);
   res.json({ token: criarToken(r.id), usuario: u });
 }));
