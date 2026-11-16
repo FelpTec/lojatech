@@ -1,5 +1,8 @@
 ﻿# Converte o .docx em PDF usando o Microsoft Word instalado (Windows)
 param([string]$Docx, [string]$Pdf)
+# Aceita caminhos relativos: o Word (COM) exige caminho absoluto
+$Docx = [IO.Path]::GetFullPath((Join-Path (Get-Location) $Docx))
+$Pdf = [IO.Path]::GetFullPath((Join-Path (Get-Location) $Pdf))
 $word = New-Object -ComObject Word.Application
 $word.Visible = $false
 $word.DisplayAlerts = 0

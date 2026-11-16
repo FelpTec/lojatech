@@ -13,12 +13,6 @@ Este artigo apresenta o LojaTech, uma aplicação web de gestão de vendas e est
 
 **Palavras-chave:** MySQL; MongoDB; persistência poliglota; *stored procedures*; controle de acesso.
 
-## Abstract
-
-This paper presents LojaTech, a web application for sales and inventory management whose business rules are implemented inside the MySQL 8 Database Management System (DBMS). The goal is to demonstrate the integrated use of the main features of a relational DBMS: normalized tables with integrity constraints, indexes justified through execution plans, six triggers, six views, nine functions and five stored procedures, explicit transaction control, custom identifier generation for critical data, and role-based access control following the principle of least privilege. As an additional feature, the NoSQL database MongoDB was integrated to store flexible-schema product specifications and the application event log. The methodology comprised modeling, implementation of re-runnable scripts, interface development and verification through 31 automated tests, 26 of them end-to-end. The application (Node.js and HTML/CSS/JavaScript) accesses the database through an account with no direct write privileges on tables, so every change goes through stored procedures. The results show that centralizing rules in the DBMS ensures atomicity, consistency under concurrency, automatic auditing and verifiable security, even for accesses made outside the application.
-
-**Keywords:** MySQL; MongoDB; polyglot persistence; stored procedures; access control.
-
 ## 1. Introdução
 
 Pequenos comércios dependem de dados de vendas e estoque corretos. Os erros mais comuns têm consequências financeiras diretas:
