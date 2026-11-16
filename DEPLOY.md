@@ -1,5 +1,7 @@
 # Publicação (deploy)
 
+> **Decisão do grupo:** a apresentação será feita **localmente no notebook**, com Docker (`scripts/preparar-apresentacao.ps1`). Isso cobre aplicação, MySQL e MongoDB, sem custo e sem depender da internet da sala. As opções abaixo ficam documentadas para referência.
+
 O LojaTech precisa de três peças:
 - um servidor Node.js;
 - um **MySQL 8 completo** (procedures, triggers, roles, criação de usuários);

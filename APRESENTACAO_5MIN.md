@@ -1,7 +1,8 @@
 # Roteiro da apresentação (5 min + 1 min de NoSQL)
 
 **Preparação antes de entrar:**
-- `docker compose up -d --build`;
+- **Na véspera, com internet:** rode `scripts\preparar-apresentacao.ps1` uma vez no notebook da apresentação. Isso baixa as imagens Docker e confirma os 31 testes.
+- **No dia, 10 minutos antes:** abra o Docker Desktop e rode o script de novo. Ele recria os bancos limpos e abre o navegador; não depende de internet;
 - deixe abertas três abas do navegador e um terminal na pasta do projeto;
 - faça login como **Vendedor** e deixe o carrinho com 1 produto;
 - recrie o banco limpo com `docker compose down -v && docker compose up -d --build` se necessário.

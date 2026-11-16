@@ -17,6 +17,14 @@ Projeto acadêmico da disciplina de Banco de Dados, na **Universidade Católica 
 
 Documentação: [ARTIGO.md](ARTIGO.md) (artigo técnico) · [APRESENTACAO_5MIN.md](APRESENTACAO_5MIN.md) (roteiro) · [DEPLOY.md](DEPLOY.md) (publicação).
 
+## Preparar a apresentação (Windows, um comando)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\preparar-apresentacao.ps1
+```
+
+O script recria MySQL + MongoDB do zero, roda os 31 testes, recria os bancos limpos e abre o navegador. Depois que as imagens Docker foram baixadas uma vez, ele funciona **sem internet**.
+
 ## Executar com Docker (recomendado)
 
 ```bash
