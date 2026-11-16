@@ -9,7 +9,7 @@
 
 ## Resumo
 
-Este artigo apresenta o LojaTech, uma aplicação web de gestão de vendas e estoque cujas regras de negócio estão implementadas no próprio Sistema Gerenciador de Banco de Dados (SGBD) MySQL 8. O objetivo é demonstrar o uso integrado dos principais recursos de um SGBD relacional: tabelas normalizadas com restrições de integridade, índices justificados por meio do plano de execução, seis *triggers*, seis *views*, nove *functions* e cinco *stored procedures*, controle transacional explícito, geração própria de identificadores para dados críticos e controle de acesso por *roles* segundo o princípio do menor privilégio. Como recurso adicional, foi integrado o banco NoSQL MongoDB para armazenar fichas técnicas de esquema flexível e o registro de eventos da aplicação. A metodologia envolveu modelagem, implementação de scripts reexecutáveis, desenvolvimento da interface e verificação por 31 testes automatizados, 26 deles de ponta a ponta. A aplicação (Node.js e HTML/CSS/JavaScript) acessa o banco por uma conta sem privilégio de escrita direta em tabelas, de modo que toda alteração passa por *procedures*. Os resultados mostram que concentrar as regras no SGBD garante atomicidade, consistência sob concorrência, auditoria automática e segurança verificável, inclusive diante de acessos feitos fora da aplicação.
+Este artigo apresenta o LojaTech, uma aplicação web de gestão de vendas e estoque cujas regras de negócio estão implementadas no próprio Sistema Gerenciador de Banco de Dados (SGBD) MySQL 8. O objetivo é demonstrar o uso integrado dos principais recursos de um SGBD relacional: tabelas normalizadas com restrições de integridade, índices justificados por meio do plano de execução, seis *triggers*, seis *views*, nove *functions* e cinco *stored procedures*, controle transacional explícito, geração própria de identificadores para dados críticos e controle de acesso por *roles* segundo o princípio do menor privilégio. Como recurso extra, adotou-se a persistência poliglota: o MySQL permanece como banco principal e fonte da verdade de preços, estoque e vendas, enquanto o banco NoSQL MongoDB armazena as fichas técnicas dos produtos, cujos atributos variam por categoria, e o registro de eventos da aplicação, de alto volume e com expiração automática. A metodologia envolveu modelagem, implementação de scripts reexecutáveis, desenvolvimento da interface e verificação por 31 testes automatizados, 26 deles de ponta a ponta. A aplicação (Node.js e HTML/CSS/JavaScript) acessa o banco por uma conta sem privilégio de escrita direta em tabelas, de modo que toda alteração passa por *procedures*. Os resultados mostram que concentrar as regras no SGBD garante atomicidade, consistência sob concorrência, auditoria automática e segurança verificável, inclusive diante de acessos feitos fora da aplicação.
 
 **Palavras-chave:** MySQL; MongoDB; persistência poliglota; *stored procedures*; controle de acesso.
 
@@ -25,6 +25,8 @@ Quando essas regras ficam apenas no código da aplicação, qualquer acesso que 
 
 O LojaTech adota a abordagem oposta: **o banco de dados é o guardião das regras**. A aplicação web é uma camada de apresentação e validação de entrada. Integridade, atomicidade, auditoria e autorização são garantidas pelo MySQL.
 
+Como recurso extra, o sistema combina o MySQL com o banco NoSQL MongoDB, em uma abordagem conhecida como persistência poliglota: cada tipo de dado fica no banco cujo modelo mais combina com ele (SADALAGE; FOWLER, 2013). O MySQL continua sendo o banco principal, responsável por tudo o que exige transação e integridade. O MongoDB guarda apenas dois tipos de dado em que o modelo relacional seria um obstáculo: as fichas técnicas dos produtos, cujos atributos mudam conforme a categoria, e o registro de eventos da aplicação, volumoso e sem necessidade de transação. Os dois bancos não se substituem, e a loja continua vendendo mesmo se o MongoDB ficar indisponível. A seção 6 detalha essa integração.
+
 ## 2. Objetivos
 
 **Objetivo geral:** desenvolver uma aplicação completa, com frontend, backend e banco relacional MySQL, que demonstre o domínio dos recursos de um SGBD.
@@ -37,6 +39,7 @@ O LojaTech adota a abordagem oposta: **o banco de dados é o guardião das regra
 5. Gerar identificadores próprios para dados críticos, sem lacunas e seguros em concorrência.
 6. Definir contas e *roles* com privilégios mínimos, sem uso do `root` pela aplicação.
 7. Exibir na interface dados de entidades e de views, com validação de ponta a ponta.
+8. **Recurso extra:** integrar um banco NoSQL (MongoDB) de forma coerente com o problema, justificando quais dados ficam nele, por que e quais vantagens traz (seção 6).
 
 ## 3. Metodologia
 
@@ -409,6 +412,33 @@ A API recusa objetos aninhados nos valores. Isso impede **injeção de operadore
 4. **Manutenção zero do histórico:** o TTL elimina rotinas de expurgo.
 5. **Degradação graciosa** (testada): com o MongoDB parado, login, vendas e cadastros continuam funcionando. Só as fichas e o painel de atividade ficam indisponíveis (HTTP 503), e tudo volta sozinho quando o serviço retorna.
 
+### 6.7 Implementação no repositório e como verificar
+
+A integração NoSQL está implementada e versionada junto com o restante do sistema (Quadro 14).
+
+**Quadro 14** – Arquivos da integração NoSQL no repositório
+
+| Arquivo | Conteúdo |
+|---|---|
+| `db/nosql/init/01_lojatech_nosql.js` | Instalação reexecutável do MongoDB: coleções `fichas_tecnicas` e `eventos` com validação `$jsonSchema`, índices (curinga, TTL e compostos), role `r_lojatech_app_nosql`, usuário `lojatech_app` e as 12 fichas técnicas iniciais |
+| `db/nosql/demo/demo_nosql.js` | Script de demonstração: esquema flexível, busca com índice curinga e `explain`, rejeição pelo validador, agregação, TTL e operações negadas pelo controle de acesso |
+| `nosql.js` | Camada de acesso da API ao MongoDB: fichas técnicas, registro de eventos, agregações do painel e degradação graciosa |
+| `server.js` | Rotas da API que usam o MongoDB (`/api/fichas`, `/api/produtos/:id/ficha`, `/api/nosql/painel`, `/api/nosql/busca`) e o registro de eventos nas operações de negócio |
+| `public/js/app.js` | Interface: tela "NoSQL · MongoDB", ficha técnica dos produtos e atributos exibidos no catálogo de vendas |
+| `public/js/validacao.js` | Regras de validação da ficha e da busca por atributo, compartilhadas entre navegador e API |
+| `docker-compose.yml` | Serviço MongoDB 8 que sobe junto com o MySQL e a aplicação |
+| `tests/api.test.js` | 6 testes de ponta a ponta do NoSQL (bloco "NoSQL (MongoDB)") |
+
+Fonte: elaborado pelos autores (2026).
+
+Para verificar, basta executar `docker compose up -d --build` e acessar a tela "NoSQL · MongoDB" da aplicação, ou rodar o script de demonstração com a conta da aplicação:
+
+```
+docker compose exec -T mongo mongosh -u lojatech_app -p 'AppMongo@2026!' --authenticationDatabase lojatech_nosql lojatech_nosql /demo/demo_nosql.js
+```
+
+Os 6 testes automatizados do NoSQL fazem parte dos 31 executados por `npm test` e estavam todos passando na entrega.
+
 ## 7. Conclusão
 
 O LojaTech mostrou que mover as regras de negócio para o SGBD traz garantias que o código da aplicação sozinho não oferece:
@@ -418,6 +448,8 @@ O LojaTech mostrou que mover as regras de negócio para o SGBD traz garantias qu
 - **segurança verificável:** roles e views como fronteira de privilégio.
 
 A conta da aplicação não consegue ler senhas, CPFs nem alterar tabelas diretamente; isso é demonstrado ao vivo.
+
+Como recurso extra, a integração com o MongoDB mostrou que um banco NoSQL complementa o relacional quando usado para o que ele faz melhor. As fichas técnicas ganharam esquema flexível, com busca indexada por qualquer atributo, e o log de eventos ganhou expiração automática e agregações sem pesar nas transações de venda. O MySQL continua como fonte da verdade de preço, estoque e pedidos, e a loja segue funcionando mesmo com o MongoDB fora do ar.
 
 **Limitações e trabalhos futuros:**
 - substituir SHA-256 com salt por um algoritmo lento (bcrypt/Argon2). Hoje o hash é feito no banco justamente para que a aplicação não precise ler a tabela de usuários;
