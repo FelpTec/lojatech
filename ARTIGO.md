@@ -308,7 +308,7 @@ A loja tem dois tipos de dado em que o modelo relacional **não agrega garantias
 
 Os 11 tipos de evento são: login (sucesso, falha, bloqueado), venda (registrada, recusada), cliente (cadastrado, recusado), reposição, alteração de preço, ficha atualizada e acesso negado.
 
-Por LGPD, o log **não** guarda CPF nem e-mail de clientes, e o IP é armazenado anonimizado (último octeto zerado).
+Por LGPD, o log **não** guarda CPF nem e-mail de clientes. Em tentativas de login, o e-mail digitado é gravado mascarado (`v***@lojatech.com`), e o IP é armazenado anonimizado (último octeto zerado).
 
 ### 6.3 Recursos do MongoDB utilizados
 

@@ -224,19 +224,22 @@ app.get('/api/saude', rota(async (_req, res) => {
 app.post('/api/login', rota(async (req, res) => {
   const { email, senha } = req.body || {};
   exigirValido(V.validarLogin({ email, senha }));
+  // No log vai só uma forma mascarada (v***@dominio): um e-mail digitado errado,
+  // ou uma senha colada no campo errado, não fica legível no MongoDB.
   const emailNorm = email.trim().toLowerCase();
+  const emailLog = emailNorm.replace(/^(.)[^@]*(@.*)$/, '$1***$2');
   const chaves = chavesLogin(req.ip, email);
   let atraso;
   try {
     atraso = reservarTentativa(chaves);              // conta ANTES de qualquer await
   } catch (e) {
-    if (e.status === 429) nosql.registrarEvento('login_bloqueado', req, { email: emailNorm });
+    if (e.status === 429) nosql.registrarEvento('login_bloqueado', req, { email: emailLog });
     throw e;
   }
   if (atraso) await dormir(atraso);
   const [[r]] = await pool.query('SELECT fn_autenticar(?, ?) AS id', [email.trim(), senha]);
   if (!r.id) {
-    nosql.registrarEvento('login_falha', req, { email: emailNorm });
+    nosql.registrarEvento('login_falha', req, { email: emailLog });
     throw new ErroHttp(401, 'E-mail ou senha incorretos');
   }
   liberarTentativas(chaves);
