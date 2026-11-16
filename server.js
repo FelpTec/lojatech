@@ -122,48 +122,63 @@ const autenticar = rota(async (req, _res, next) => {
 const exigirPermissao = (flag, texto) => (req, _res, next) =>
   next(req.usuario[flag] ? undefined : new ErroHttp(403, `Seu perfil não pode ${texto}`));
 
-// Proteção contra força bruta no login:
-//  * por IP (IPv6 agrupado por /64) e por IP+e-mail: 5 erros → bloqueio de 1 minuto;
-//  * por conta (e-mail): ATRASO progressivo de até 5 s, sem bloquear. Assim um
-//    atacante distribuído fica lento, mas não consegue trancar a conta de outra pessoa.
+// Proteção contra força bruta no login. Cada tentativa é CONTADA ANTES de
+// qualquer await (sem corrida entre requisições simultâneas):
+//  * por IP (IPv6 agrupado por /64) e por IP+e-mail: mais de 5 tentativas sem
+//    sucesso em 1 minuto → 429;
+//  * por conta: atraso progressivo (até 5 s), sem bloquear, para que um
+//    terceiro não consiga trancar a conta de outra pessoa.
+// Se o mapa enche, o login fica indisponível para todos (falha fechada).
+const net = require('net');
 const tentativas = new Map();
 const LIMITE_MAPA = 10000;
+const JANELA_MS = 60e3;
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function chaveIp(ip) {
-  const limpo = String(ip || '').replace(/^::ffff:/, '');
-  return limpo.includes(':') ? limpo.split(':').slice(0, 4).join(':') + '::/64' : limpo;
+  let a = String(ip || '').split('%')[0];                       // remove zone id
+  if (/^::ffff:\d+\.\d+\.\d+\.\d+$/i.test(a)) a = a.slice(7);     // IPv4 mapeado
+  if (net.isIPv4(a) || !net.isIPv6(a)) return a;
+  const [esq, dir = ''] = a.split('::');                        // expande "::"
+  const e = esq ? esq.split(':') : [];
+  const d = a.includes('::') ? (dir ? dir.split(':') : []) : [];
+  const grupos = a.includes('::') ? [...e, ...Array(8 - e.length - d.length).fill('0'), ...d] : e;
+  return grupos.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':') + '::/64';
 }
+
 const chavesLogin = (ip, email) => {
   const e = String(email).trim().toLowerCase();
-  return { bloqueio: [`ip:${chaveIp(ip)}`, `ip-email:${chaveIp(ip)}|${e}`], conta: `conta:${e}` };
+  const i = chaveIp(ip);
+  return { limite: [`ip:${i}`, `ip-email:${i}|${e}`], conta: `conta:${e}` };
 };
-function checarLimiteLogin({ bloqueio }) {
-  if (bloqueio.some((k) => (tentativas.get(k)?.bloqueadoAte || 0) > Date.now())) {
-    throw new ErroHttp(429, 'Muitas tentativas. Aguarde 1 minuto.');
-  }
+
+function limparExpirados() {
+  const corte = Date.now() - 15 * 60e3;
+  for (const [k, t] of tentativas) if (t.ultimo < corte) tentativas.delete(k);
 }
-async function atrasoDaConta({ conta }) {
-  const t = tentativas.get(conta);
-  if (t && t.ultimo > Date.now() - 15 * 60e3 && t.falhas > 3) await dormir(Math.min(250 * 2 ** (t.falhas - 4), 5000));
-}
-function limparMapa() {
+
+// Síncrona: registra a tentativa e decide se ela pode prosseguir.
+function reservarTentativa({ limite, conta }) {
+  if (tentativas.size >= LIMITE_MAPA) limparExpirados();
+  if (tentativas.size >= LIMITE_MAPA) throw new ErroHttp(503, 'Login temporariamente indisponível. Tente em instantes.');
   const agora = Date.now();
-  // remove só o que já expirou; bloqueios ativos nunca são descartados
-  for (const [k, t] of tentativas) if (t.bloqueadoAte < agora && t.ultimo < agora - 15 * 60e3) tentativas.delete(k);
-  for (const [k, t] of tentativas) { if (tentativas.size < LIMITE_MAPA) break; if (t.bloqueadoAte < agora) tentativas.delete(k); }
-  if (tentativas.size >= LIMITE_MAPA) throw new ErroHttp(429, 'Serviço de login sobrecarregado. Tente em instantes.');
-}
-function registrarFalha({ bloqueio, conta }) {
-  if (tentativas.size >= LIMITE_MAPA) limparMapa();
-  const agora = Date.now();
-  for (const k of [...bloqueio, conta]) {
-    const t = tentativas.get(k) || { falhas: 0, bloqueadoAte: 0, ultimo: 0 };
-    t.falhas += 1; t.ultimo = agora;
-    if (k !== conta && t.falhas >= 5) { t.falhas = 0; t.bloqueadoAte = agora + 60e3; }
-    tentativas.delete(k); tentativas.set(k, t);
+  let excedeu = false;
+  for (const k of limite) {
+    let t = tentativas.get(k);
+    if (!t || agora - t.inicio > JANELA_MS) t = { n: 0, inicio: agora, ultimo: agora };
+    t.n += 1; t.ultimo = agora;
+    tentativas.set(k, t);
+    if (t.n > 5) excedeu = true;
   }
+  const c = tentativas.get(conta) || { n: 0, inicio: agora, ultimo: agora };
+  if (agora - c.ultimo > 15 * 60e3) { c.n = 0; }
+  c.n += 1; c.ultimo = agora;
+  tentativas.set(conta, c);
+  if (excedeu) throw new ErroHttp(429, 'Muitas tentativas. Aguarde 1 minuto.');
+  return c.n > 4 ? Math.min(250 * 2 ** (c.n - 5), 5000) : 0;   // atraso por conta
 }
-function limparSucesso({ bloqueio, conta }) { [...bloqueio, conta].forEach((k) => tentativas.delete(k)); }
+
+function liberarTentativas({ limite, conta }) { [...limite, conta].forEach((k) => tentativas.delete(k)); }
 
 // ---------------------------------------------------------------------
 // App
@@ -195,14 +210,11 @@ app.post('/api/login', rota(async (req, res) => {
   const { email, senha } = req.body || {};
   exigirValido(V.validarLogin({ email, senha }));
   const chaves = chavesLogin(req.ip, email);
-  checarLimiteLogin(chaves);
-  await atrasoDaConta(chaves);
+  const atraso = reservarTentativa(chaves);          // conta ANTES de qualquer await
+  if (atraso) await dormir(atraso);
   const [[r]] = await pool.query('SELECT fn_autenticar(?, ?) AS id', [email.trim(), senha]);
-  if (!r.id) {
-    registrarFalha(chaves);
-    throw new ErroHttp(401, 'E-mail ou senha incorretos');
-  }
-  limparSucesso(chaves);
+  if (!r.id) throw new ErroHttp(401, 'E-mail ou senha incorretos');
+  liberarTentativas(chaves);
   const [[u]] = await pool.query('SELECT * FROM vw_usuarios_publico WHERE id = ?', [r.id]);
   res.json({ token: criarToken(r.id), usuario: u });
 }));
