@@ -9,7 +9,7 @@ O LojaTech precisa de três peças:
 
 > **Por que não GitHub Pages?** Ele só hospeda arquivos estáticos; a API e os bancos não rodariam lá.
 
-## Recomendado para a apresentação: Railway
+## Opção com link fixo: Railway (pago)
 
 Aplicação, MySQL e MongoDB ficam no mesmo projeto, **sempre ligados** (sem a demora inicial dos planos gratuitos), e o link é fixo. Custo: crédito de teste de US$ 5 e, depois, o plano Hobby (cerca de US$ 5/mês).
 
