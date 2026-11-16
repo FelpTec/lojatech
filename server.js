@@ -122,33 +122,48 @@ const autenticar = rota(async (req, _res, next) => {
 const exigirPermissao = (flag, texto) => (req, _res, next) =>
   next(req.usuario[flag] ? undefined : new ErroHttp(403, `Seu perfil não pode ${texto}`));
 
-// Limite de tentativas de login (5 erros → 1 minuto) por IP e pelo par IP+e-mail.
-// Não bloqueamos só pelo e-mail: um terceiro poderia trancar a conta de
-// outra pessoa errando a senha dela de propósito.
+// Proteção contra força bruta no login:
+//  * por IP (IPv6 agrupado por /64) e por IP+e-mail: 5 erros → bloqueio de 1 minuto;
+//  * por conta (e-mail): ATRASO progressivo de até 5 s, sem bloquear. Assim um
+//    atacante distribuído fica lento, mas não consegue trancar a conta de outra pessoa.
 const tentativas = new Map();
 const LIMITE_MAPA = 10000;
-const chavesLogin = (ip, email) => [`ip:${ip}`, `ip-email:${ip}|${String(email).trim().toLowerCase()}`];
-function checarLimiteLogin(chaves) {
-  if (chaves.some((k) => (tentativas.get(k)?.bloqueadoAte || 0) > Date.now())) {
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+function chaveIp(ip) {
+  const limpo = String(ip || '').replace(/^::ffff:/, '');
+  return limpo.includes(':') ? limpo.split(':').slice(0, 4).join(':') + '::/64' : limpo;
+}
+const chavesLogin = (ip, email) => {
+  const e = String(email).trim().toLowerCase();
+  return { bloqueio: [`ip:${chaveIp(ip)}`, `ip-email:${chaveIp(ip)}|${e}`], conta: `conta:${e}` };
+};
+function checarLimiteLogin({ bloqueio }) {
+  if (bloqueio.some((k) => (tentativas.get(k)?.bloqueadoAte || 0) > Date.now())) {
     throw new ErroHttp(429, 'Muitas tentativas. Aguarde 1 minuto.');
   }
 }
+async function atrasoDaConta({ conta }) {
+  const t = tentativas.get(conta);
+  if (t && t.ultimo > Date.now() - 15 * 60e3 && t.falhas > 3) await dormir(Math.min(250 * 2 ** (t.falhas - 4), 5000));
+}
 function limparMapa() {
   const agora = Date.now();
-  for (const [k, t] of tentativas) if (t.bloqueadoAte < agora && t.ultimo < agora - 10 * 60e3) tentativas.delete(k);
-  // Ainda cheio: descarta os mais antigos (Map mantém ordem de inserção), nunca todos de uma vez
-  for (const k of tentativas.keys()) { if (tentativas.size <= LIMITE_MAPA) break; tentativas.delete(k); }
+  // remove só o que já expirou; bloqueios ativos nunca são descartados
+  for (const [k, t] of tentativas) if (t.bloqueadoAte < agora && t.ultimo < agora - 15 * 60e3) tentativas.delete(k);
+  for (const [k, t] of tentativas) { if (tentativas.size < LIMITE_MAPA) break; if (t.bloqueadoAte < agora) tentativas.delete(k); }
+  if (tentativas.size >= LIMITE_MAPA) throw new ErroHttp(429, 'Serviço de login sobrecarregado. Tente em instantes.');
 }
-function registrarFalha(chaves) {
+function registrarFalha({ bloqueio, conta }) {
   if (tentativas.size >= LIMITE_MAPA) limparMapa();
-  for (const k of chaves) {
+  const agora = Date.now();
+  for (const k of [...bloqueio, conta]) {
     const t = tentativas.get(k) || { falhas: 0, bloqueadoAte: 0, ultimo: 0 };
-    t.falhas += 1;
-    t.ultimo = Date.now();
-    if (t.falhas >= 5) { t.falhas = 0; t.bloqueadoAte = Date.now() + 60e3; }
-    tentativas.delete(k); tentativas.set(k, t);              // reinsere: vira o mais recente
+    t.falhas += 1; t.ultimo = agora;
+    if (k !== conta && t.falhas >= 5) { t.falhas = 0; t.bloqueadoAte = agora + 60e3; }
+    tentativas.delete(k); tentativas.set(k, t);
   }
 }
+function limparSucesso({ bloqueio, conta }) { [...bloqueio, conta].forEach((k) => tentativas.delete(k)); }
 
 // ---------------------------------------------------------------------
 // App
@@ -181,12 +196,13 @@ app.post('/api/login', rota(async (req, res) => {
   exigirValido(V.validarLogin({ email, senha }));
   const chaves = chavesLogin(req.ip, email);
   checarLimiteLogin(chaves);
+  await atrasoDaConta(chaves);
   const [[r]] = await pool.query('SELECT fn_autenticar(?, ?) AS id', [email.trim(), senha]);
   if (!r.id) {
     registrarFalha(chaves);
     throw new ErroHttp(401, 'E-mail ou senha incorretos');
   }
-  chaves.forEach((k) => tentativas.delete(k));
+  limparSucesso(chaves);
   const [[u]] = await pool.query('SELECT * FROM vw_usuarios_publico WHERE id = ?', [r.id]);
   res.json({ token: criarToken(r.id), usuario: u });
 }));
