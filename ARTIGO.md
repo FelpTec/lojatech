@@ -2,7 +2,7 @@
 
 **Autores:** [Nome 1], [Nome 2], [Nome 3]
 **Curso:** [Curso] — Universidade Católica de Brasília (UCB) · Disciplina: [Banco de Dados] · Prof.: [Nome]
-**Repositório:** [link do GitHub]
+**Repositório:** https://github.com/FelpTec/lojatech
 
 ---
 
