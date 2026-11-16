@@ -259,3 +259,30 @@ dialog .dialogo-acoes { padding: 14px 22px; border-top: 1px solid var(--borda); 
 .btn-largo { width: 100%; min-height: 46px; }
 .kpi .valor.valor-pequeno { font-size: 1rem; line-height: 1.5; }
 td.mono, td .mono { white-space: nowrap; }
+
+/* ---------- NoSQL (MongoDB) ---------- */
+.fonte.mongo { background: #E8F5EC; color: #146B3A; }
+.specs { display: flex; flex-wrap: wrap; gap: 4px 6px; font-size: .78rem; color: var(--texto-suave); }
+.specs span { background: #F2F4FA; border-radius: 6px; padding: 1px 7px; }
+.specs b { color: var(--texto); font-weight: 600; }
+.porques { display: grid; gap: 14px; }
+.porques h3 { font-size: 1rem; color: var(--ucb-azul); margin-bottom: 4px; }
+.porques p { margin: 0; color: var(--texto-suave); font-size: .95rem; }
+.linha-busca { display: grid; grid-template-columns: 1.4fr .8fr 1fr; gap: 0 12px; }
+.linha-atributo { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin-bottom: 8px; }
+.linha-atributo input, .campo textarea { border: 1px solid #C9CDDD; border-radius: 8px; padding: 8px 10px; min-height: 40px; width: 100%; background: #fff; }
+.barra-h { display: grid; grid-template-columns: 150px 1fr 40px; gap: 10px; align-items: center; padding: 6px 0; }
+.barra-h .trilho { height: 10px; background: #EDEFF5; border-radius: 99px; overflow: hidden; }
+.barra-h .trilho span { display: block; height: 100%; border-radius: 99px; background: var(--ucb-azul); }
+.barra-h .trilho span.ok { background: var(--sucesso); }
+.barra-h .trilho span.zero { background: var(--perigo); }
+.eventos { list-style: none; margin: 0; padding: 4px 18px 12px; max-height: 420px; overflow-y: auto; }
+.eventos li { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--borda); }
+.eventos li:last-child { border-bottom: 0; }
+.evento-txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; }
+details summary { cursor: pointer; color: var(--ucb-azul); font-weight: 600; margin: 8px 0; }
+@media (max-width: 820px) {
+  .linha-busca, .linha-atributo { grid-template-columns: 1fr; }
+  .barra-h { grid-template-columns: 110px 1fr 32px; }
+  .eventos li { grid-template-columns: 1fr; gap: 4px; }
+}

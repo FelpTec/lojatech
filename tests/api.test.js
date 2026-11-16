@@ -187,3 +187,62 @@ describe('Controle de acesso no MySQL', () => {
     }
   });
 });
+
+describe('NoSQL (MongoDB)', () => {
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  test('fichas têm atributos diferentes por categoria', async () => {
+    const { status, dados } = await req('GET', '/api/fichas', { token: consulta });
+    assert.equal(status, 200);
+    const monitor = dados.find((f) => f._id === 10);
+    const ssd = dados.find((f) => f._id === 6);
+    assert.ok('taxa_hz' in monitor.atributos && !('taxa_hz' in ssd.atributos));
+    assert.ok('leitura_mbps' in ssd.atributos);
+  });
+
+  test('busca por atributo usa o índice curinga e junta dados do MySQL', async () => {
+    const { status, dados } = await req('GET', '/api/nosql/busca?chave=capacidade_gb&operador=gte&valor=1000', { token: consulta });
+    assert.equal(status, 200);
+    assert.equal(dados.plano.estagio, 'IXSCAN');
+    assert.equal(dados.plano.indice, 'idx_atributos_curinga');
+    assert.ok(dados.resultados.length >= 2 && dados.resultados.every((r) => r.valor >= 1000 && typeof r.preco === 'number'));
+  });
+
+  test('validação da busca e da ficha (API) antes de chegar ao MongoDB', async () => {
+    let r = await req('GET', '/api/nosql/busca?chave=Taxa%20Hz&operador=gte&valor=abc', { token: consulta });
+    assert.equal(r.status, 422); assert.ok(r.dados.campos.chave && r.dados.campos.valor);
+    r = await req('PUT', '/api/produtos/8/ficha', { token: admin, corpo: { atributos: { 'Chave Ruim': 1 } } });
+    assert.equal(r.status, 422); assert.ok(r.dados.campos.atributos);
+    r = await req('PUT', '/api/produtos/8/ficha', { token: admin, corpo: { atributos: { a: { $where: 'x' } } } });
+    assert.equal(r.status, 422, 'objetos aninhados (injeção de operador) são recusados');
+  });
+
+  test('só quem gerencia estoque edita fichas; produto precisa existir no MySQL', async () => {
+    assert.equal((await req('PUT', '/api/produtos/8/ficha', { token: vendedor, corpo: { atributos: { cor: 'azul' } } })).status, 403);
+    assert.equal((await req('PUT', '/api/produtos/9999/ficha', { token: admin, corpo: { atributos: { cor: 'azul' } } })).status, 404);
+    const r = await req('PUT', '/api/produtos/8/ficha', { token: admin, corpo: { atributos: { capacidade_gb: 64, interface: 'USB 3.2', cor: 'preto' }, destaques: ['Teste'] } });
+    assert.equal(r.status, 200);
+    const f = await req('GET', '/api/produtos/8/ficha', { token: consulta });
+    assert.equal(f.dados.atributos.cor, 'preto');
+    assert.equal(f.dados.categoria, 'Armazenamento', 'categoria vem do MySQL');
+  });
+
+  test('venda gera evento no MongoDB e o painel agrega', async () => {
+    const v = await req('POST', '/api/vendas', { token: vendedor, corpo: { cliente: 'CLI-000003', itens: [{ produto: 12, quantidade: 1 }] } });
+    assert.equal(v.status, 201);
+    await espera(400);                                 // evento é gravado de forma assíncrona
+    const { dados } = await req('GET', '/api/nosql/painel', { token: consulta });
+    assert.ok(dados.recentes.some((e) => e.tipo === 'venda_registrada' && e.dados.pedido === v.dados.pedido));
+    assert.ok(dados.porTipo.some((t) => t._id === 'venda_registrada'));
+    assert.ok(dados.indices.some((c) => c.indices.some((i) => i.ttl_dias === 90)));
+  });
+
+  test('conta do MongoDB não apaga log nem banco (menor privilégio)', async () => {
+    const { dados } = await req('GET', '/api/nosql/painel', { token: consulta });
+    assert.equal(dados.conta, 'lojatech_app@lojatech_nosql');
+    for (const t of dados.testes) {
+      const r = await req('POST', `/api/nosql/testar/${t.id}`, { token: consulta });
+      assert.equal(r.dados.permitido, false, `${t.id} deveria ser negado`);
+    }
+  });
+});

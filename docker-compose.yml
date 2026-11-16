@@ -1,6 +1,6 @@
-# Sobe o ambiente completo: MySQL 8.4 (instalado pelos scripts de db/init) + API.
-#   docker compose up -d --build        → http://localhost:3000
-#   docker compose --profile tunel up   → também gera um link público temporário (Cloudflare)
+# Ambiente completo: MySQL 8.4 + MongoDB 8 (instalados pelos scripts de db/) + API.
+#   docker compose up -d --build                          → http://localhost:3000
+#   TRUST_PROXY=1 docker compose --profile tunel up -d    → também gera um link público temporário
 services:
   db:
     image: mysql:8.4
@@ -18,6 +18,26 @@ services:
       test: ["CMD-SHELL", "mysql -h127.0.0.1 -ulojatech_relatorio -pRelatorio@Senha2026! -e 'SELECT 1 FROM lojatech.vw_painel' >/dev/null 2>&1"]
       interval: 5s
       retries: 60
+
+  mongo:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin_instalacao                                  # só a instalação usa
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-troque-esta-senha-mongo}
+      MONGO_INITDB_DATABASE: lojatech_nosql
+      MONGO_APP_PASS: ${MONGO_APP_PASS:-AppMongo@2026!}                             # lido pelo script de init
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./db/nosql/init:/docker-entrypoint-initdb.d:ro
+      - ./db/nosql/demo:/demo:ro
+      - dados_mongo:/data/db
+    ports:
+      - "127.0.0.1:27018:27017"   # MongoDB Compass em localhost:27018 (só nesta máquina)
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet -u lojatech_app -p \"$$MONGO_APP_PASS\" --authenticationDatabase lojatech_nosql --eval \"quit(db.getSiblingDB('lojatech_nosql').fichas_tecnicas.countDocuments() >= 12 ? 0 : 1)\""]
+      interval: 5s
+      retries: 40
+
   app:
     build: .
     environment:
@@ -25,6 +45,9 @@ services:
       DB_PORT: 3306
       DB_USER: lojatech_app                 # conta de menor privilégio — nunca root
       DB_PASS: ${DB_PASS:-App@Senha2026!}
+      MONGO_HOST: mongo
+      MONGO_USER: lojatech_app              # role r_lojatech_app_nosql — nunca o admin
+      MONGO_PASS: ${MONGO_APP_PASS:-AppMongo@2026!}
       SESSION_SECRET: ${SESSION_SECRET:-}   # vazio → a API gera um segredo aleatório a cada início
       TRUST_PROXY: ${TRUST_PROXY:-}         # use 1 só quando houver proxy/túnel na frente
       TZ: America/Sao_Paulo
@@ -33,12 +56,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mongo:
+        condition: service_started          # o MongoDB é complementar: a loja sobe mesmo sem ele
+
   tunel:
     image: cloudflare/cloudflared:latest
     profiles: ["tunel"]
     command: tunnel --no-autoupdate --url http://app:3000
-    # com o túnel, suba com TRUST_PROXY=1 para o limite de login ver o IP real
     depends_on: [app]
 
 volumes:
   dados_mysql:
+  dados_mongo:

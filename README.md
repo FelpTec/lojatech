@@ -1,6 +1,6 @@
 # LojaTech · Vendas e Estoque sobre MySQL
 
-Projeto acadêmico da disciplina de Banco de Dados, na **Universidade Católica de Brasília (UCB)**. É uma aplicação web completa (MySQL 8 + Node.js/Express + HTML/CSS/JS), com as regras de negócio implementadas dentro do SGBD.
+Projeto acadêmico da disciplina de Banco de Dados, na **Universidade Católica de Brasília (UCB)**. É uma aplicação web completa (MySQL 8 + MongoDB 8 + Node.js/Express + HTML/CSS/JS), com as regras de negócio implementadas dentro do SGBD.
 
 | Recurso | Implementação |
 |---|---|
@@ -12,14 +12,15 @@ Projeto acadêmico da disciplina de Banco de Dados, na **Universidade Católica 
 | TCL | COMMIT, ROLLBACK, SAVEPOINT e handler. Demo em [`db/demo/01_transacoes_tcl.sql`](db/demo/01_transacoes_tcl.sql) |
 | Controle de acesso | 3 roles e 3 contas, sem root. Demo em [`db/demo/02_controle_acesso.sql`](db/demo/02_controle_acesso.sql) |
 | Validação | Mesmas regras no navegador, na API e no banco ([`public/js/validacao.js`](public/js/validacao.js)) |
-| Testes | 25 testes automatizados: 20 de ponta a ponta + 5 unitários (`npm test`) |
+| **Extra: NoSQL** | MongoDB para fichas técnicas (esquema flexível, índice curinga) e log de eventos (TTL, agregações), com conta de menor privilégio. Demo em [`db/nosql/demo/demo_nosql.js`](db/nosql/demo/demo_nosql.js) |
+| Testes | 31 testes automatizados: 26 de ponta a ponta + 5 unitários (`npm test`) |
 
 Documentação: [ARTIGO.md](ARTIGO.md) (artigo técnico) · [APRESENTACAO_5MIN.md](APRESENTACAO_5MIN.md) (roteiro) · [DEPLOY.md](DEPLOY.md) (publicação).
 
 ## Executar com Docker (recomendado)
 
 ```bash
-docker compose up -d --build      # MySQL 8.4 + API; os scripts de db/init rodam sozinhos
+docker compose up -d --build      # MySQL 8.4 + MongoDB 8 + API; os scripts de instalação rodam sozinhos
 # abra http://localhost:3000
 npm install && npm test           # testes de ponta a ponta contra o ambiente no ar
 ```
@@ -33,7 +34,7 @@ Contas de demonstração (também aparecem na tela de login):
 | Consulta | consulta@lojatech.com | Consulta@2026 |
 
 Para **recriar o banco do zero**: `docker compose down -v && docker compose up -d --build`.
-O MySQL fica exposto em `localhost:3307`, para uso no Workbench com `lojatech_dba` / `Dba@Senha2026!`.
+O MySQL fica exposto em `localhost:3307`, para uso no Workbench com `lojatech_dba` / `Dba@Senha2026!`. O MongoDB fica em `localhost:27018`, para o Compass com `lojatech_app` / `AppMongo@2026!` (authSource `lojatech_nosql`).
 
 ### Link público temporário para testes
 
@@ -58,8 +59,10 @@ O link funciona enquanto o computador estiver ligado com o Docker rodando. Para 
 ```
 db/init/        01_estrutura · 02_rotinas · 03_seguranca · 04_dados   (instalação, reexecutável)
 db/demo/        scripts para a apresentação (TCL, acesso, índices)
+db/nosql/       MongoDB: instalação (init/) e demonstração (demo/)
 public/         frontend (index.html, css/, js/app.js, js/validacao.js)
 server.js       API Express (conta lojatech_app)
+nosql.js        acesso ao MongoDB (fichas e eventos)
 tests/          testes de ponta a ponta e unitários
 docs/           DER (png, svg, mermaid)
 ```

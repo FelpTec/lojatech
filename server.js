@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const express = require('express');
 const mysql = require('mysql2/promise');
 const V = require('./public/js/validacao');
+const nosql = require('./nosql');
 
 try { process.loadEnvFile(path.join(__dirname, '.env')); } catch { /* .env opcional (Docker/Vercel injetam variáveis) */ }
 
@@ -119,8 +120,22 @@ const autenticar = rota(async (req, _res, next) => {
   next();
 });
 
-const exigirPermissao = (flag, texto) => (req, _res, next) =>
-  next(req.usuario[flag] ? undefined : new ErroHttp(403, `Seu perfil não pode ${texto}`));
+const exigirPermissao = (flag, texto) => (req, _res, next) => {
+  if (req.usuario[flag]) return next();
+  nosql.registrarEvento('acesso_negado', req, { permissao: flag });
+  next(new ErroHttp(403, `Seu perfil não pode ${texto}`));
+};
+
+// Executa a operação no MySQL; se a regra de negócio recusar, registra o
+// motivo como evento no MongoDB (auditoria) e repassa o erro.
+async function comRecusa(req, tipo, dados, operacao) {
+  try {
+    return await operacao();
+  } catch (e) {
+    if (e.sqlState === '45000') nosql.registrarEvento(tipo, req, { ...dados, motivo: e.sqlMessage });
+    throw e;
+  }
+}
 
 // Proteção contra força bruta no login. Cada tentativa é CONTADA ANTES de
 // qualquer await (sem corrida entre requisições simultâneas):
@@ -209,13 +224,25 @@ app.get('/api/saude', rota(async (_req, res) => {
 app.post('/api/login', rota(async (req, res) => {
   const { email, senha } = req.body || {};
   exigirValido(V.validarLogin({ email, senha }));
+  const emailNorm = email.trim().toLowerCase();
   const chaves = chavesLogin(req.ip, email);
-  const atraso = reservarTentativa(chaves);          // conta ANTES de qualquer await
+  let atraso;
+  try {
+    atraso = reservarTentativa(chaves);              // conta ANTES de qualquer await
+  } catch (e) {
+    if (e.status === 429) nosql.registrarEvento('login_bloqueado', req, { email: emailNorm });
+    throw e;
+  }
   if (atraso) await dormir(atraso);
   const [[r]] = await pool.query('SELECT fn_autenticar(?, ?) AS id', [email.trim(), senha]);
-  if (!r.id) throw new ErroHttp(401, 'E-mail ou senha incorretos');
+  if (!r.id) {
+    nosql.registrarEvento('login_falha', req, { email: emailNorm });
+    throw new ErroHttp(401, 'E-mail ou senha incorretos');
+  }
   liberarTentativas(chaves);
   const [[u]] = await pool.query('SELECT * FROM vw_usuarios_publico WHERE id = ?', [r.id]);
+  req.usuario = u;
+  nosql.registrarEvento('login_sucesso', req);
   res.json({ token: criarToken(r.id), usuario: u });
 }));
 
@@ -257,6 +284,7 @@ app.post('/api/produtos/:id/reposicao', exigirPermissao('pode_gerenciar_estoque'
     if (!Number.isInteger(id) || id < 1) throw new ErroHttp(404, 'Produto não encontrado');
     exigirValido(V.validarReposicao({ quantidade, motivo }));
     await chamarProcedure('CALL sp_repor_estoque(?, ?, ?, ?)', [req.usuario.id, id, quantidade, motivo.trim()]);
+    nosql.registrarEvento('estoque_reposto', req, { produto: id, quantidade, motivo: motivo.trim() });
     res.json({ ok: true });
   }));
 
@@ -267,6 +295,7 @@ app.put('/api/produtos/:id/preco', exigirPermissao('pode_gerenciar_estoque', 'al
     if (!Number.isInteger(id) || id < 1) throw new ErroHttp(404, 'Produto não encontrado');
     exigirValido(V.validarPreco({ preco }));
     await chamarProcedure('CALL sp_atualizar_preco(?, ?, ?)', [req.usuario.id, id, preco]);
+    nosql.registrarEvento('preco_alterado', req, { produto: id, preco });
     res.json({ ok: true });
   }));
 
@@ -288,9 +317,10 @@ app.post('/api/clientes', exigirPermissao('pode_cadastrar_clientes', 'cadastrar 
   rota(async (req, res) => {
     const { nome, cpf, email, telefone } = req.body || {};
     exigirValido(V.validarCliente({ nome, cpf, email, telefone }));
-    const { id } = await chamarProcedure(
+    const { id } = await comRecusa(req, 'cliente_recusado', {}, () => chamarProcedure(
       'CALL sp_cadastrar_cliente(?, ?, ?, ?, ?, @id)',
-      [req.usuario.id, nome.trim(), V.soDigitos(cpf), email.trim(), V.soDigitos(telefone) || null], ['id']);
+      [req.usuario.id, nome.trim(), V.soDigitos(cpf), email.trim(), V.soDigitos(telefone) || null], ['id']));
+    nosql.registrarEvento('cliente_cadastrado', req, { cliente: id });   // sem CPF/e-mail no log (LGPD)
     res.status(201).json({ ok: true, id });
   }));
 
@@ -312,13 +342,77 @@ app.post('/api/vendas', exigirPermissao('pode_vender', 'registrar vendas'), rota
   const { cliente, itens } = req.body || {};
   exigirValido(V.validarVenda({ cliente, itens }));
   const limpos = itens.map(({ produto, quantidade }) => ({ produto, quantidade }));
-  const r = await chamarProcedure('CALL sp_registrar_venda(?, ?, ?, @pedido, @total)',
-    [req.usuario.id, cliente, JSON.stringify(limpos)], ['pedido', 'total']);
+  const r = await comRecusa(req, 'venda_recusada', { cliente, itens: limpos }, () => chamarProcedure(
+    'CALL sp_registrar_venda(?, ?, ?, @pedido, @total)',
+    [req.usuario.id, cliente, JSON.stringify(limpos)], ['pedido', 'total']));
+  nosql.registrarEvento('venda_registrada', req, { pedido: r.pedido, total: r.total, cliente, itens: limpos });
   res.status(201).json({ ok: true, ...r });
 }));
 
 app.get('/api/usuarios', rota(async (_req, res) => {
   const [r] = await pool.query('SELECT id, nome, email, grupo, ativo, ultimo_login, pode_vender, pode_gerenciar_estoque, pode_cadastrar_clientes FROM vw_usuarios_publico ORDER BY nome');
+  res.json(r);
+}));
+
+// ---- NoSQL (MongoDB): fichas técnicas e painel de atividade -----------
+const idProduto = (v) => {
+  const id = Number(v);
+  if (!Number.isInteger(id) || id < 1) throw new ErroHttp(404, 'Produto não encontrado');
+  return id;
+};
+
+app.get('/api/fichas', rota(async (_req, res) => {
+  res.json(await nosql.fichas.listar());
+}));
+
+app.get('/api/produtos/:id/ficha', rota(async (req, res) => {
+  const id = idProduto(req.params.id);
+  res.json((await nosql.fichas.obter(id)) || { _id: id, atributos: {}, destaques: [] });
+}));
+
+app.put('/api/produtos/:id/ficha', exigirPermissao('pode_gerenciar_estoque', 'editar fichas técnicas'),
+  rota(async (req, res) => {
+    const id = idProduto(req.params.id);
+    const { atributos, destaques = [] } = req.body || {};
+    exigirValido(V.validarFicha({ atributos, destaques }));
+    // O produto precisa existir no MySQL (fonte da verdade); a categoria vem de lá
+    const [[p]] = await pool.query(
+      'SELECT c.nome AS categoria FROM produtos p JOIN categorias c ON c.id = p.categoria_id WHERE p.id = ?', [id]);
+    if (!p) throw new ErroHttp(404, 'Produto não encontrado');
+    const limpos = Object.fromEntries(Object.entries(atributos).map(([k, v]) =>
+      [k, typeof v === 'string' ? v.trim() : Array.isArray(v) ? v.map((x) => x.trim()) : v]));
+    await nosql.fichas.salvar(id, p.categoria, limpos, destaques.map((d) => d.trim()), req.usuario.id);
+    nosql.registrarEvento('ficha_atualizada', req, { produto: id, atributos: Object.keys(limpos) });
+    res.json({ ok: true });
+  }));
+
+app.get('/api/nosql/painel', rota(async (_req, res) => {
+  const [painel, chaves] = await Promise.all([nosql.eventos.painel(), nosql.fichas.chaves()]);
+  res.json({ ...painel, chaves, testes: await nosql.eventos.testarAcesso() });
+}));
+
+// Busca por atributo + junção (feita na aplicação) com nome/preço/estoque do MySQL
+app.get('/api/nosql/busca', rota(async (req, res) => {
+  const { chave, operador, valor } = req.query;
+  exigirValido(V.validarBuscaAtributo({ chave, operador, valor }));
+  const convertido = V.converterValorAtributo(valor);
+  const v = operador === 'contem' || Array.isArray(convertido) ? String(valor).trim() : convertido;
+  const r = await nosql.fichas.buscar(chave, operador, v);
+  const ids = r.docs.map((d) => d._id);
+  const [produtos] = ids.length
+    ? await pool.query('SELECT id, nome, preco, estoque FROM produtos WHERE id IN (?)', [ids])
+    : [[]];
+  const porId = new Map(produtos.map((p) => [p.id, p]));
+  res.json({
+    filtro: r.filtro,
+    plano: r.plano,
+    resultados: r.docs.map((d) => ({ id: d._id, ...porId.get(d._id), categoria: d.categoria, valor: d.atributos[chave] })),
+  });
+}));
+
+app.post('/api/nosql/testar/:acao', rota(async (req, res) => {
+  const r = await nosql.eventos.testarAcesso(req.params.acao);
+  if (!r) throw new ErroHttp(404, 'Teste desconhecido');
   res.json(r);
 }));
 
@@ -358,6 +452,8 @@ app.use('/api', (_req, _res, next) => next(new ErroHttp(404, 'Rota não encontra
 app.use((err, _req, res, _next) => {
   if (err.type === 'entity.parse.failed') err = new ErroHttp(400, 'JSON inválido');
   if (err.type === 'entity.too.large') err = new ErroHttp(413, 'Requisição grande demais');
+  if (err instanceof nosql.NoSqlIndisponivel) err = new ErroHttp(503, err.message);
+  else if (err?.code === 121) err = new ErroHttp(422, 'Documento rejeitado pelo validador de esquema do MongoDB');
   const e = traduzErroBanco(err);
   res.status(e.status).json({ erro: e.message, campos: e.campos });
 });

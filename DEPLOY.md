@@ -1,10 +1,61 @@
 # Publicação (deploy)
 
-O LojaTech precisa de **um servidor Node.js e um MySQL 8 completo**, com suporte a procedures, triggers, roles e criação de usuários.
+O LojaTech precisa de três peças:
+- um servidor Node.js;
+- um **MySQL 8 completo** (procedures, triggers, roles, criação de usuários);
+- um **MongoDB**.
 
-> **Por que não GitHub Pages?** O GitHub Pages só hospeda arquivos estáticos. A API e o MySQL não rodariam lá, e o trabalho exige justamente a comunicação com o banco.
+> **Por que não GitHub Pages?** Ele só hospeda arquivos estáticos; a API e os bancos não rodariam lá.
 
-## Opção 1 — Link temporário (zero configuração)
+## Recomendado para a apresentação: Railway
+
+Aplicação, MySQL e MongoDB ficam no mesmo projeto, **sempre ligados** (sem a demora inicial dos planos gratuitos), e o link é fixo. Custo: crédito de teste de US$ 5 e, depois, o plano Hobby (cerca de US$ 5/mês).
+
+### Passo a passo (CLI)
+
+```bash
+npm i -g @railway/cli
+railway login                       # abre o navegador
+railway init -n lojatech            # cria o projeto
+railway add --database mysql
+railway add --database mongo
+railway add --service app           # serviço da aplicação (usa o Dockerfile)
+```
+
+**1. Instalar os bancos.** Use as URLs públicas: no painel, cada banco tem **Connect → Public Network**. As contas administrativas servem **só** para a instalação; a aplicação nunca as usa.
+
+```bash
+# MySQL (4 scripts, na ordem)
+for f in db/init/*.sql; do
+  docker run --rm -i mysql:8.4 mysql -h <host> -P <porta> -u root -p<senha> --default-character-set=utf8mb4 < "$f"
+done
+
+# MongoDB (cria coleções, validadores, índices, role e o usuário lojatech_app)
+docker run --rm -v "$PWD/db/nosql/init:/init:ro" -e MONGO_APP_PASS='<senha forte>' mongo:8.0 \
+  mongosh "<MONGO_PUBLIC_URL>" /init/01_lojatech_nosql.js
+```
+
+**2. Configurar as variáveis** do serviço `app` (Variables):
+
+```
+DB_HOST=${{MySQL.MYSQLHOST}}
+DB_PORT=${{MySQL.MYSQLPORT}}
+DB_USER=lojatech_app
+DB_PASS=App@Senha2026!
+MONGO_HOST=${{MongoDB.RAILWAY_PRIVATE_DOMAIN}}
+MONGO_PORT=27017
+MONGO_USER=lojatech_app
+MONGO_PASS=<a mesma senha do passo 1>
+SESSION_SECRET=<valor aleatório longo>
+TRUST_PROXY=1
+TZ=America/Sao_Paulo
+```
+
+**3. Publicar:** `railway up --service app`. Depois, em **Settings → Networking → Generate Domain**, gere o link público.
+
+**4. Verificar:** `BASE_URL=https://<seu-domínio> npm test` deve mostrar 31 testes passando.
+
+## Alternativa sem custo: link temporário (túnel)
 
 Expõe o ambiente local por um túnel da Cloudflare:
 
@@ -14,45 +65,12 @@ TRUST_PROXY=1 docker compose --profile tunel up -d
 docker compose logs tunel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com'
 ```
 
-- O link muda a cada reinício.
-- Ele só funciona enquanto o computador estiver ligado com o Docker rodando.
-- É ideal para o grupo testar ou para a demonstração.
+O link muda a cada reinício e depende do computador ligado. Serve para testes do grupo.
 
-## Opção 2 — Railway (permanente, mais simples)
+## Plano B no dia: rodar localmente
 
-Roda o mesmo Dockerfile e um MySQL completo, com acesso administrativo para instalar os scripts.
+Levem o notebook com Docker e o projeto já iniciado (`docker compose up -d --build` antes da aula). Funciona **sem internet** e é a opção mais segura caso a rede da sala falhe.
 
-1. Em https://railway.app, crie um projeto com **Deploy from GitHub repo** e escolha este repositório. O Dockerfile é detectado.
-2. No mesmo projeto, adicione o serviço **MySQL** em **New → Database → MySQL**.
-3. Instale o banco a partir da sua máquina. Use os dados de **MySQL → Connect → Public Network**; essa conta administrativa serve só para a instalação.
-   ```bash
-   for f in db/init/*.sql; do mysql -h <host> -P <porta> -u root -p<senha> --default-character-set=utf8mb4 < "$f"; done
-   ```
-4. No serviço da aplicação, configure as **Variables**:
-   ```
-   DB_HOST=${{MySQL.MYSQLHOST}}
-   DB_PORT=${{MySQL.MYSQLPORT}}
-   DB_USER=lojatech_app
-   DB_PASS=App@Senha2026!
-   SESSION_SECRET=<valor aleatório longo>
-   ```
-5. Em **Settings → Networking → Generate Domain**, o link público fica pronto.
+---
 
-## Opção 3 — Vercel (app) + Aiven (MySQL), plano gratuito
-
-1. Crie um MySQL gratuito em https://aiven.io.
-   - Em *Advanced configuration*, ative `log_bin_trust_function_creators`.
-   - Remova a linha `SET GLOBAL …` do início e do fim de `db/init/02_rotinas.sql`, porque bancos gerenciados não dão esse privilégio.
-2. Instale os scripts com `avnadmin`, como no passo 3 da opção 2.
-3. Em https://vercel.com, use **Add New → Project** e importe o repositório. O `vercel.json` e o `api/index.js` já estão prontos.
-4. Configure as *Environment Variables*:
-   - `DB_HOST`, `DB_PORT`, `DB_USER=lojatech_app`, `DB_PASS`, `SESSION_SECRET`;
-   - `DB_SSL=true`, porque o Aiven exige TLS.
-
-## Depois de publicar
-
-```bash
-BASE_URL=https://seu-link npm test     # roda os 25 testes automatizados contra o deploy
-```
-
-Troque as senhas de demonstração de `db/init/03_seguranca.sql` e do `.env` antes de um uso real.
+Troque as senhas de demonstração (`db/init/03_seguranca.sql`, `MONGO_APP_PASS` e `.env`) antes de qualquer uso real.

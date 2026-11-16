@@ -96,8 +96,58 @@
     return erros;
   }
 
+  // ---- NoSQL: ficha técnica (atributos livres, mas com limites) ----
+  const RE_CHAVE_ATRIBUTO = /^[a-z][a-z0-9_]{0,39}$/;
+  const OPERADORES_BUSCA = ['eq', 'gte', 'lte', 'contem'];
+
+  function validarFicha(d = {}) {
+    const erros = {};
+    const a = d.atributos;
+    if (!a || typeof a !== 'object' || Array.isArray(a)) {
+      erros.atributos = 'Atributos inválidos';
+    } else {
+      const chaves = Object.keys(a);
+      if (chaves.length === 0) erros.atributos = 'Informe ao menos um atributo';
+      else if (chaves.length > 30) erros.atributos = 'No máximo 30 atributos';
+      for (const k of chaves) {
+        const v = a[k];
+        if (!RE_CHAVE_ATRIBUTO.test(k)) { erros.atributos = `Nome "${k}" inválido: use minúsculas, números e _ (ex.: taxa_hz)`; break; }
+        const okTexto = typeof v === 'string' && v.trim().length >= 1 && v.length <= 80;
+        const okNumero = typeof v === 'number' && Number.isFinite(v);
+        const okLista = Array.isArray(v) && v.length >= 1 && v.length <= 10 && v.every((x) => typeof x === 'string' && x.trim() && x.length <= 40);
+        if (!(okTexto || okNumero || typeof v === 'boolean' || okLista)) { erros.atributos = `Valor de "${k}" inválido`; break; }
+      }
+    }
+    const dest = d.destaques ?? [];
+    if (!Array.isArray(dest) || dest.length > 5 || !dest.every((x) => typeof x === 'string' && x.trim() && x.length <= 80)) {
+      erros.destaques = 'Até 5 destaques de no máximo 80 caracteres';
+    }
+    return erros;
+  }
+
+  // Converte o texto digitado no tipo certo (número / booleano / texto)
+  function converterValorAtributo(texto) {
+    const t = String(texto).trim();
+    if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+    if (t === 'true' || t === 'sim') return true;
+    if (t === 'false' || t === 'não' || t === 'nao') return false;
+    if (t.includes(',')) return t.split(',').map((x) => x.trim()).filter(Boolean);
+    return t;
+  }
+
+  function validarBuscaAtributo(d = {}) {
+    const erros = {};
+    if (!RE_CHAVE_ATRIBUTO.test(String(d.chave || ''))) erros.chave = 'Escolha um atributo válido';
+    if (!OPERADORES_BUSCA.includes(d.operador)) erros.operador = 'Operador inválido';
+    const v = String(d.valor ?? '').trim();
+    if (!v || v.length > 40) erros.valor = 'Informe um valor (até 40 caracteres)';
+    else if ((d.operador === 'gte' || d.operador === 'lte') && !/^-?\d+(\.\d+)?$/.test(v)) erros.valor = 'Use um número para ≥ e ≤';
+    return erros;
+  }
+
   return {
-    RE_CLIENTE_ID, RE_PEDIDO_ID,
+    RE_CLIENTE_ID, RE_PEDIDO_ID, RE_CHAVE_ATRIBUTO, OPERADORES_BUSCA,
+    validarFicha, converterValorAtributo, validarBuscaAtributo,
     soDigitos, cpfValido, emailValido,
     validarLogin, validarCliente, validarVenda, validarReposicao, validarPreco,
   };

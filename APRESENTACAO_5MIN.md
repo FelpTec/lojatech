@@ -1,4 +1,4 @@
-# Roteiro da apresentação (5 minutos)
+# Roteiro da apresentação (5 min + 1 min de NoSQL)
 
 **Preparação antes de entrar:**
 - `docker compose up -d --build`;
@@ -15,7 +15,8 @@
 | **2:35–3:10** | Índices | `docker compose exec -T db mysql -ulojatech_dba -pDba@Senha2026! lojatech < db/demo/03_indices_explain.sql`: `idx_pedidos_cliente_data` → `range`; o mesmo SELECT com `IGNORE INDEX` → `ALL`. Custo × benefício. |
 | **3:10–3:50** | Views + stored objects | Na interface, cada tela mostra uma etiqueta **VIEW / TABELA / PROCEDURE** com a origem dos dados. `vw_clientes` mascara o CPF (LGPD). Triggers: baixa de estoque, histórico de preço (alterar um preço como Admin), CPF inválido barrado no banco. 9 functions e 5 procedures. |
 | **3:50–4:40** | **Controle de acesso** | Tela **Segurança do BD**: `CURRENT_USER()` = `lojatech_app@%` (não é root), roles, `SHOW GRANTS` sem INSERT/UPDATE/DELETE. Clicar **"Tentar todas"**: 6 operações **NEGADAS pelo MySQL**. Entrar como **Consulta**: o botão de vender fica desabilitado e a procedure também recusa. |
-| **4:40–5:00** | Fechamento | Validação em 3 camadas (navegador, API, banco), 25 testes automatizados (20 de ponta a ponta) passando, ambiente reproduzível com Docker. |
+| **4:40–5:40** | **Extra: NoSQL (MongoDB)** | Abrir **NoSQL · MongoDB**. (1) *Por quê:* fichas técnicas têm atributos diferentes por categoria (mostrar a Ficha do Monitor × a do SSD), e os eventos são volumosos e sem transação. (2) *Busca por atributo* `capacidade_gb ≥ 1000` → **IXSCAN** no índice curinga, com preço e estoque vindos do MySQL. (3) *Eventos recentes:* a venda feita no início da apresentação aparece no log; agregação por tipo; TTL de 90 dias. (4) *Segurança:* `dropDatabase` → **NEGADO**. (5) *Vantagem-chave:* `docker compose stop mongo`, e a venda continua funcionando. |
+| **5:40–6:00** | Fechamento | Validação em 3 camadas (navegador, API, banco), 31 testes automatizados (26 de ponta a ponta) passando, ambiente reproduzível com Docker. |
 
 **Dicas:**
 - Ensaiem com cronômetro. Se o tempo apertar, pule o bloco 2:05–2:35, porque a interface já demonstra o TCL.
@@ -23,4 +24,6 @@
 - Possíveis perguntas do professor e respostas:
   - *"Por que não usar o root?"* → menor privilégio: um vazamento da senha da aplicação não permite ler senhas, CPFs nem apagar dados.
   - *"E se a procedure for chamada dentro de uma transação?"* → ela é dona da transação, e o START TRANSACTION interno confirmaria o que estava aberto. Por isso a API sempre chama em autocommit.
+  - *"Por que não guardar a ficha numa coluna JSON do MySQL?"* → daria, mas sem índice curinga: seria preciso criar uma coluna gerada por atributo. O log também continuaria disputando recursos com as vendas, e não haveria TTL nativo.
+  - *"E a consistência entre os dois bancos?"* → o MySQL é a fonte da verdade. A ficha só guarda atributos descritivos, e a API confere que o produto existe no MySQL antes de gravar.
   - *"Por que o hash de senha fica no banco?"* → para a aplicação não precisar de SELECT na tabela de usuários. O trade-off é o SHA-256; bcrypt fica como trabalho futuro.

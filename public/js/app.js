@@ -29,7 +29,9 @@
     return `${dia}/${m}/${a}${h ? ' ' + h.slice(0, 5) : ''}`;
   };
   const iniciais = (n) => String(n || '?').split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
-  const fonte = (tipo, nome) => `<span class="fonte ${tipo === 'VIEW' ? 'view' : tipo === 'PROCEDURE' ? 'proc' : ''}" title="Origem dos dados no MySQL">${tipo} <code>${esc(nome)}</code></span>`;
+  const fonte = (tipo, nome) => `<span class="fonte ${tipo === 'VIEW' ? 'view' : tipo === 'PROCEDURE' ? 'proc' : tipo === 'MONGODB' ? 'mongo' : ''}" title="Origem dos dados">${tipo} <code>${esc(nome)}</code></span>`;
+  const rotuloAtributo = (k) => k.replace(/_/g, ' ');
+  const valorAtributo = (v) => (Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'sim' : 'não') : String(v));
   const icone = {
     ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
@@ -185,7 +187,7 @@
   // ------------------------------------------------------------------
   // Roteamento por hash
   // ------------------------------------------------------------------
-  const paginas = { painel, venda, pedidos, clientes, produtos, estoque, equipe, seguranca };
+  const paginas = { painel, venda, pedidos, clientes, produtos, estoque, equipe, seguranca, nosql };
 
   async function rotear() {
     if (!estado.usuario) return;
@@ -243,7 +245,11 @@
   // ------------------------------------------------------------------
   async function venda(alvo) {
     const podeVender = !!estado.usuario.pode_vender;
-    const [produtosLista, clientesLista] = await Promise.all([api('GET', '/api/produtos'), api('GET', '/api/clientes')]);
+    const [produtosLista, clientesLista, fichasLista] = await Promise.all([
+      api('GET', '/api/produtos'), api('GET', '/api/clientes'),
+      api('GET', '/api/fichas').catch(() => []),            // MongoDB fora do ar não impede a venda
+    ]);
+    const fichaPorId = new Map(fichasLista.map((f) => [f._id, f]));
     const produtosAtivos = produtosLista.filter((p) => p.ativo);
     const porId = new Map(produtosAtivos.map((p) => [p.id, p]));
     // Mantém o carrinho coerente com o estoque atual
@@ -300,6 +306,7 @@
         return `<div class="produto-card">
           <span class="cat">${esc(p.categoria)}</span>
           <span class="nome">${esc(p.nome)}</span>
+          ${(() => { const f = fichaPorId.get(p.id); return f ? `<span class="specs" title="Ficha técnica (MongoDB)">${Object.entries(f.atributos).slice(0, 3).map(([k, v]) => `<span>${esc(rotuloAtributo(k))}: <b>${esc(valorAtributo(v))}</b></span>`).join('')}</span>` : ''; })()}
           <span class="preco">${fmtMoeda(p.preco)}</span>
           <div class="rodape"><small class="suave">${etiquetaEstoque(p)} ${p.estoque} un.</small>
             <button class="btn btn-destaque btn-pequeno" data-add="${p.id}" type="button" ${!podeVender || disponivel <= 0 ? 'disabled' : ''} aria-label="Adicionar ${esc(p.nome)}">${icone.mais}</button></div>
@@ -526,7 +533,7 @@
           ${gerencia ? '' : '<span class="suave">Somente leitura para o seu perfil</span>'}
         </div>
         <div class="tabela-rolagem"><table>
-          <thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th class="num">Preço</th><th>Estoque</th><th class="num">Mín.</th>${gerencia ? '<th></th>' : ''}</tr></thead>
+          <thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th class="num">Preço</th><th>Estoque</th><th class="num">Mín.</th><th></th></tr></thead>
           <tbody id="lista-produtos"></tbody>
         </table></div>
       </section>`;
@@ -545,12 +552,13 @@
           <td class="num">${fmtMoeda(p.preco)}</td>
           <td><div class="estoque-barra"><b class="num">${p.estoque}</b><span class="trilho"><span class="${classe}" data-larg="${Math.min(100, (p.estoque / Math.max(p.estoque_minimo * 3, 1)) * 100)}"></span></span>${etiquetaEstoque(p)}</div></td>
           <td class="num">${p.estoque_minimo}</td>
-          ${gerencia ? `<td class="acoes"><button class="btn btn-texto btn-pequeno" data-repor="${p.id}">Repor</button><button class="btn btn-texto btn-pequeno" data-preco="${p.id}">Preço</button></td>` : ''}
+          <td class="acoes"><button class="btn btn-texto btn-pequeno" data-ficha="${p.id}" title="Ficha técnica (MongoDB)">Ficha</button>${gerencia ? `<button class="btn btn-texto btn-pequeno" data-repor="${p.id}">Repor</button><button class="btn btn-texto btn-pequeno" data-preco="${p.id}">Preço</button>` : ''}</td>
         </tr>`;
       }).join('') || `<tr><td colspan="7" class="vazio">Nenhum produto encontrado.</td></tr>`;
       $$('[data-larg]', alvo).forEach((s) => { s.style.width = `${s.dataset.larg}%`; });
       $$('[data-repor]', alvo).forEach((b) => b.addEventListener('click', () => dialogoReposicao(lista.find((p) => p.id === Number(b.dataset.repor)), carregar)));
       $$('[data-preco]', alvo).forEach((b) => b.addEventListener('click', () => dialogoPreco(lista.find((p) => p.id === Number(b.dataset.preco)), carregar)));
+      $$('[data-ficha]', alvo).forEach((b) => b.addEventListener('click', () => dialogoFicha(lista.find((p) => p.id === Number(b.dataset.ficha)), gerencia)));
     };
     let atraso;
     $('#prod-busca').addEventListener('input', () => { clearTimeout(atraso); atraso = setTimeout(carregar, 250); });
@@ -695,6 +703,199 @@
     };
     $$('[data-teste]', alvo).forEach((b) => $('button', b).addEventListener('click', () => testar(b).catch((e) => toast(e.message, 'erro'))));
     $('#testar-todos').addEventListener('click', async () => { for (const b of $$('[data-teste]', alvo)) await testar(b).catch((e) => toast(e.message, 'erro')); });
+  }
+
+  // ------------------------------------------------------------------
+  // FICHA TÉCNICA (MongoDB · coleção fichas_tecnicas)
+  // ------------------------------------------------------------------
+  async function dialogoFicha(p, podeEditar) {
+    let ficha;
+    try { ficha = await api('GET', `/api/produtos/${p.id}/ficha`); } catch (e) { return toast(e.message, 'erro'); }
+    const linhas = Object.entries(ficha.atributos || {});
+    const json = JSON.stringify({ _id: ficha._id, categoria: ficha.categoria, atributos: ficha.atributos, destaques: ficha.destaques, atualizado_por: ficha.atualizado_por }, null, 2);
+    const leitura = `
+      <p>${fonte('MONGODB', 'fichas_tecnicas')} <span class="suave"><small>Preço e estoque continuam no MySQL.</small></span></p>
+      ${linhas.length ? `<table><tbody>${linhas.map(([k, v]) => `<tr><th>${esc(rotuloAtributo(k))}</th><td>${esc(valorAtributo(v))}</td></tr>`).join('')}</tbody></table>` : '<p class="vazio">Sem ficha técnica cadastrada.</p>'}
+      ${(ficha.destaques || []).length ? `<p class="specs">${ficha.destaques.map((d) => `<span>★ ${esc(d)}</span>`).join('')}</p>` : ''}
+      <details class="mt"><summary>Ver documento JSON</summary><pre class="grants">${esc(json)}</pre></details>`;
+    const edicao = `
+      <form id="form-ficha" novalidate>
+        <p>${fonte('MONGODB', 'fichas_tecnicas')} <span class="suave"><small>Cada categoria tem atributos próprios: esquema flexível.</small></span></p>
+        <div id="linhas-ficha"></div>
+        <button type="button" class="btn btn-texto btn-pequeno" id="add-linha">${icone.mais} Adicionar atributo</button>
+        <div class="campo"><span class="erro" data-erro="atributos"></span></div>
+        <div class="campo"><label for="ficha-destaques">Destaques <span class="suave">(um por linha, até 5)</span></label>
+          <textarea id="ficha-destaques" name="destaques" rows="3" maxlength="420">${esc((ficha.destaques || []).join('\n'))}</textarea>
+          <span class="erro" data-erro="destaques"></span></div>
+        <p class="dica suave"><small>Valores numéricos viram número; "sim/não" viram booleano; itens separados por vírgula viram lista.</small></p>
+        <details><summary>Ver documento JSON atual</summary><pre class="grants">${esc(json)}</pre></details>
+      </form>`;
+    const dlg = abrirDialogo({
+      titulo: `Ficha técnica · ${p.nome}`,
+      corpo: podeEditar ? edicao : leitura,
+      acoes: podeEditar
+        ? [{ texto: 'Cancelar', acao: () => $('#dialogo').close() }, { texto: 'Salvar no MongoDB', classe: 'btn-primario', submit: 'form-ficha' }]
+        : [{ texto: 'Fechar', classe: 'btn-primario', acao: () => $('#dialogo').close() }],
+    });
+    if (!podeEditar) return;
+    const caixa = $('#linhas-ficha', dlg);
+    const addLinha = (k = '', v = '') => {
+      const div = document.createElement('div');
+      div.className = 'linha-atributo';
+      div.innerHTML = `<input aria-label="Atributo" placeholder="atributo (ex.: taxa_hz)" maxlength="40" value="${esc(k)}">
+        <input aria-label="Valor" placeholder="valor" maxlength="200" value="${esc(v === '' ? '' : valorAtributo(v))}">
+        <button type="button" class="btn btn-texto btn-pequeno" aria-label="Remover atributo">${icone.lixo}</button>`;
+      div.querySelector('button').onclick = () => div.remove();
+      caixa.append(div);
+    };
+    linhas.forEach(([k, v]) => addLinha(k, v));
+    if (!linhas.length) addLinha();
+    $('#add-linha', dlg).onclick = () => addLinha();
+    const form = $('#form-ficha', dlg);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const atributos = {};
+      for (const l of $$('.linha-atributo', caixa)) {
+        const [ik, iv] = $$('input', l);
+        const k = ik.value.trim().toLowerCase();
+        if (!k && !iv.value.trim()) continue;
+        atributos[k] = iv.value.trim() === '' ? '' : V.converterValorAtributo(iv.value);
+      }
+      const destaques = form.destaques.value.split('\n').map((x) => x.trim()).filter(Boolean);
+      if (!mostrarErros(form, V.validarFicha({ atributos, destaques }))) return;
+      try {
+        await api('PUT', `/api/produtos/${p.id}/ficha`, { atributos, destaques });
+        dlg.close();
+        toast(`Ficha de "${p.nome}" salva no MongoDB`, 'sucesso');
+      } catch (e) { if (e.campos) mostrarErros(form, e.campos); toast(e.message, 'erro'); }
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // NoSQL · MongoDB (recurso extra)
+  // ------------------------------------------------------------------
+  const NOME_EVENTO = {
+    login_sucesso: 'Login', login_falha: 'Login falhou', login_bloqueado: 'Login bloqueado',
+    venda_registrada: 'Venda', venda_recusada: 'Venda recusada', cliente_cadastrado: 'Cliente cadastrado',
+    cliente_recusado: 'Cliente recusado', estoque_reposto: 'Reposição', preco_alterado: 'Preço alterado',
+    ficha_atualizada: 'Ficha atualizada', acesso_negado: 'Acesso negado',
+  };
+  const classeEvento = (t) => (/falha|recusad|bloquead|negado/.test(t) ? 'zero' : /venda_registrada|cadastrado|reposto/.test(t) ? 'ok' : 'grupo');
+  const resumoEvento = (e) => {
+    const d = e.dados || {};
+    if (e.tipo === 'venda_registrada') return `${d.pedido} · ${fmtMoeda(d.total)}`;
+    if (d.motivo) return d.motivo;
+    if (d.produto) return `produto #${d.produto}${d.quantidade ? ` · +${d.quantidade}` : ''}${d.preco ? ` · ${fmtMoeda(d.preco)}` : ''}`;
+    if (d.cliente) return d.cliente;
+    if (d.email) return d.email;
+    if (d.permissao) return d.permissao;
+    return '';
+  };
+  const hora = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  async function nosql(alvo) {
+    let d;
+    try {
+      d = await api('GET', '/api/nosql/painel');
+    } catch (e) {
+      if (e.status !== 503) throw e;
+      alvo.innerHTML = `${cabecalho('NoSQL · MongoDB', '')}
+        <div class="cartao"><div class="cartao-corpo"><div class="aviso alerta">${icone.info}<span><b>MongoDB indisponível.</b> Repare que vendas, estoque e cadastros continuam funcionando: o núcleo transacional está no MySQL e o NoSQL é complementar (degradação graciosa).</span></div></div></div>`;
+      return;
+    }
+    const eventos24h = d.porTipo.reduce((s, x) => s + x.total, 0);
+    const maxTipo = Math.max(1, ...d.porTipo.map((x) => x.total));
+    alvo.innerHTML = `
+      ${cabecalho('NoSQL · MongoDB', 'Persistência poliglota: o MySQL guarda o que exige transação; o MongoDB, o que pede esquema flexível e alto volume.', fonte('MONGODB', 'lojatech_nosql'))}
+      <div class="grade-kpi">
+        <div class="cartao kpi"><div class="rotulo">Conta MongoDB da API</div><div class="valor mono valor-pequeno">${esc(d.conta)}</div><div class="detalhe">${esc(d.roles.join(', '))}</div></div>
+        <div class="cartao kpi ciano"><div class="rotulo">Fichas técnicas</div><div class="valor">${d.totais.fichas}</div><div class="detalhe">${d.chaves.length} atributos diferentes</div></div>
+        <div class="cartao kpi laranja"><div class="rotulo">Eventos registrados</div><div class="valor">${d.totais.eventos}</div><div class="detalhe">${eventos24h} nas últimas 24 h</div></div>
+      </div>
+
+      <div class="grade-2 mb">
+        <section class="cartao">
+          <div class="cartao-topo"><h2>Por que MongoDB aqui?</h2></div>
+          <div class="cartao-corpo porques">
+            <div><h3>Fichas técnicas</h3><p>Mouse tem <i>DPI</i>, monitor tem <i>Hz</i>, SSD tem <i>MB/s</i>. No relacional seriam dezenas de colunas quase sempre nulas, ou o modelo EAV, lento e difícil de consultar. No MongoDB cada documento tem seus próprios atributos, com <b>validação $jsonSchema</b> e <b>índice curinga</b> para buscar por qualquer um deles.</p></div>
+            <div><h3>Log de eventos</h3><p>Escrita intensa, formato que varia por tipo de evento, sem necessidade de transação. O <b>índice TTL</b> apaga sozinho o que tem mais de 90 dias, e o <b>aggregation pipeline</b> gera os painéis abaixo sem pesar no MySQL das vendas.</p></div>
+            <div><h3>Fonte da verdade</h3><p>Preço, estoque e pedidos ficam <b>só no MySQL</b> (ACID). A ficha usa o mesmo <code>id</code> do produto. Se o MongoDB cair, a loja continua vendendo.</p></div>
+          </div>
+        </section>
+        <section class="cartao">
+          <div class="cartao-topo"><h2>Busca por atributo</h2><span class="fonte mongo">índice <code>atributos.$**</code></span></div>
+          <form class="cartao-corpo" id="form-busca" novalidate>
+            <div class="linha-busca">
+              <div class="campo"><label for="b-chave">Atributo</label><input id="b-chave" name="chave" list="lista-chaves" placeholder="ex.: taxa_hz" maxlength="40" value="capacidade_gb"><span class="erro" data-erro="chave"></span></div>
+              <div class="campo"><label for="b-op">Condição</label><select id="b-op" name="operador"><option value="gte">≥</option><option value="lte">≤</option><option value="eq">=</option><option value="contem">contém</option></select><span class="erro" data-erro="operador"></span></div>
+              <div class="campo"><label for="b-valor">Valor</label><input id="b-valor" name="valor" maxlength="40" value="1000"><span class="erro" data-erro="valor"></span></div>
+            </div>
+            <datalist id="lista-chaves">${d.chaves.map((c) => `<option value="${esc(c._id)}">${c.produtos} produto(s)</option>`).join('')}</datalist>
+            <button class="btn btn-primario" type="submit">Buscar no MongoDB</button>
+            <div id="resultado-busca" class="mt"></div>
+          </form>
+        </section>
+      </div>
+
+      <div class="grade-2 mb">
+        <section class="cartao">
+          <div class="cartao-topo"><h2>Atividade nas últimas 24 h</h2><span class="fonte mongo">$match → $group → $sort</span></div>
+          <div class="cartao-corpo">${d.porTipo.length ? d.porTipo.map((x) => `
+            <div class="barra-h"><span>${esc(NOME_EVENTO[x._id] || x._id)}</span><span class="trilho"><span class="${classeEvento(x._id)}" data-larg="${(x.total / maxTipo) * 100}"></span></span><b class="num">${x.total}</b></div>`).join('') : '<p class="vazio">Nenhum evento ainda. Faça um login ou uma venda.</p>'}
+            ${d.porUsuario.length ? `<h3 class="mt">Vendas por vendedor (24 h)</h3><table><tbody>${d.porUsuario.map((u) => `<tr><td>${esc(u._id)}</td><td class="num">${u.vendas} venda(s)</td><td class="num"><b>${fmtMoeda(u.faturamento)}</b></td></tr>`).join('')}</tbody></table>` : ''}
+          </div>
+        </section>
+        <section class="cartao">
+          <div class="cartao-topo"><h2>Eventos recentes</h2><span class="fonte mongo">coleção <code>eventos</code></span></div>
+          <ul class="eventos">${d.recentes.map((e) => `<li><span class="etiqueta ${classeEvento(e.tipo)}">${esc(NOME_EVENTO[e.tipo] || e.tipo)}</span>
+            <span class="evento-txt"><b>${esc(e.usuario?.nome || 'anônimo')}</b> ${esc(resumoEvento(e))}</span><small class="suave">${hora(e.quando)}</small></li>`).join('') || '<li class="vazio">Sem eventos.</li>'}</ul>
+        </section>
+      </div>
+
+      <div class="grade-2">
+        <section class="cartao">
+          <div class="cartao-topo"><h2>Índices</h2><span class="suave">getIndexes()</span></div>
+          <div class="tabela-rolagem"><table><thead><tr><th>Coleção</th><th>Índice</th><th>Chave</th></tr></thead><tbody>
+            ${d.indices.flatMap((c) => c.indices.map((i) => `<tr><td>${esc(c.colecao)}</td><td class="mono">${esc(i.nome)}${i.ttl_dias ? ` <span class="etiqueta baixo">TTL ${i.ttl_dias} dias</span>` : ''}</td><td class="mono">${esc(JSON.stringify(i.chave))}</td></tr>`)).join('')}
+          </tbody></table></div>
+        </section>
+        <section class="cartao">
+          <div class="cartao-topo"><h2>Menor privilégio no MongoDB</h2><span class="suave">O log é imutável para a API</span></div>
+          <div class="cartao-corpo">
+            ${d.testes.map((t) => `<div class="teste-acesso" data-teste-mongo="${esc(t.id)}"><div><code>${esc(t.descricao)}</code></div>
+              <button class="btn btn-perigo btn-pequeno" type="button">Tentar</button><div class="resultado-teste" hidden></div></div>`).join('')}
+          </div>
+        </section>
+      </div>`;
+
+    $$('[data-larg]', alvo).forEach((s) => { s.style.width = `${s.dataset.larg}%`; });
+    $$('[data-teste-mongo]', alvo).forEach((b) => $('button', b).addEventListener('click', async () => {
+      try {
+        const r = await api('POST', `/api/nosql/testar/${b.dataset.testeMongo}`);
+        const res = $('.resultado-teste', b);
+        res.hidden = false;
+        res.className = `resultado-teste ${r.permitido ? 'permitido' : 'negado'}`;
+        res.textContent = r.permitido ? '⚠ PERMITIDO: privilégio demais!' : `✔ NEGADO pelo MongoDB: ${r.codigo}`;
+      } catch (e) { toast(e.message, 'erro'); }
+    }));
+
+    const form = $('#form-busca', alvo);
+    const buscar = async () => {
+      const dados = { chave: form.chave.value.trim(), operador: form.operador.value, valor: form.valor.value.trim() };
+      if (!mostrarErros(form, V.validarBuscaAtributo(dados))) return;
+      const saida = $('#resultado-busca', alvo);
+      try {
+        const r = await api('GET', `/api/nosql/busca?${new URLSearchParams(dados)}`);
+        saida.innerHTML = `
+          <p><span class="etiqueta ${r.plano.estagio === 'IXSCAN' ? 'ok' : 'baixo'}">${esc(r.plano.estagio)}</span>
+            ${r.plano.indice ? `<code>${esc(r.plano.indice)}</code>` : ''} · ${r.plano.docs_examinados} documento(s) examinado(s)</p>
+          <pre class="grants">db.fichas_tecnicas.find(${esc(JSON.stringify(r.filtro))})</pre>
+          <div class="tabela-rolagem"><table><thead><tr><th>Produto</th><th>${esc(rotuloAtributo(dados.chave))}</th><th class="num">Preço <small>(MySQL)</small></th><th class="num">Estoque <small>(MySQL)</small></th></tr></thead>
+          <tbody>${r.resultados.map((x) => `<tr><td><b>${esc(x.nome || `#${x.id}`)}</b><br><small class="suave">${esc(x.categoria)}</small></td><td>${esc(valorAtributo(x.valor))}</td><td class="num">${x.preco != null ? fmtMoeda(x.preco) : '—'}</td><td class="num">${x.estoque ?? '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="vazio">Nenhum produto com esse atributo.</td></tr>'}</tbody></table></div>`;
+      } catch (e) { if (e.campos) mostrarErros(form, e.campos); toast(e.message, 'erro'); }
+    };
+    form.addEventListener('submit', (ev) => { ev.preventDefault(); buscar(); });
+    buscar();
   }
 
   // ------------------------------------------------------------------

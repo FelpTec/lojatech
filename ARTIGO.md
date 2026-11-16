@@ -14,11 +14,12 @@ Este trabalho apresenta o LojaTech, uma aplicação web de gestão de vendas e e
 - seis triggers, seis views, nove functions e cinco stored procedures;
 - controle transacional explícito (COMMIT, ROLLBACK e SAVEPOINT);
 - geração própria de identificadores para dados críticos;
-- controle de acesso por *roles*, com o princípio do menor privilégio.
+- controle de acesso por *roles*, com o princípio do menor privilégio;
+- como recurso extra, um banco **NoSQL (MongoDB)** para fichas técnicas de esquema flexível e para o log de eventos.
 
-A aplicação (Node.js/Express com HTML/CSS/JS) acessa o banco exclusivamente por uma conta sem nenhum privilégio de escrita direta em tabelas: toda alteração passa por *procedures*. Os resultados mostram que concentrar as regras no SGBD garante consistência mesmo diante de acessos concorrentes ou fora da aplicação. Isso foi verificado por 25 testes automatizados, 20 deles de ponta a ponta.
+A aplicação (Node.js/Express com HTML/CSS/JS) acessa o banco exclusivamente por uma conta sem nenhum privilégio de escrita direta em tabelas: toda alteração passa por *procedures*. Os resultados mostram que concentrar as regras no SGBD garante consistência mesmo diante de acessos concorrentes ou fora da aplicação. Isso foi verificado por 31 testes automatizados, 26 deles de ponta a ponta.
 
-**Palavras-chave:** MySQL; stored procedures; triggers; transações; controle de acesso.
+**Palavras-chave:** MySQL; MongoDB; persistência poliglota; stored procedures; triggers; transações; controle de acesso.
 
 ## 1. Introdução
 
@@ -58,10 +59,10 @@ O desenvolvimento seguiu cinco etapas iterativas:
 4. **Desenvolvimento da API e da interface.**
 5. **Verificação:**
    - scripts de demonstração em `db/demo/` (TCL, acesso e índices);
-   - 25 testes automatizados (`npm test`; 20 deles exercitam o caminho navegador → API → MySQL);
+   - 31 testes automatizados (`npm test`; 26 deles exercitam o caminho navegador → API → MySQL/MongoDB);
    - revisão de código por ferramenta automatizada.
 
-O ambiente é reproduzível com Docker Compose (MySQL 8.4 + API), e o código está versionado em Git.
+O ambiente é reproduzível com Docker Compose (MySQL 8.4 + MongoDB 8 + API), e o código está versionado em Git.
 
 ## 4. Descrição do sistema
 
@@ -93,6 +94,7 @@ Há três perfis (`grupos_usuarios`):
 | **Node.js 22 + Express** | API leve, mesma linguagem do frontend (o módulo de validação é compartilhado), ecossistema maduro. |
 | **mysql2** | Pool de conexões, *prepared statements* (evitam SQL Injection) e suporte a procedures com parâmetros OUT. |
 | **HTML, CSS e JavaScript puros** | O foco é o banco. Sem framework, a interface fica leve, sem etapa de build e fácil de explicar. A identidade visual segue a da UCB (azul `#27348B`, ciano `#0095D9`, fonte Source Sans 3). |
+| **MongoDB 8 + driver oficial `mongodb`** | Banco de documentos para os dados de esquema flexível e alto volume (seção 6). Oferece validação `$jsonSchema`, índices curinga e TTL, *aggregation pipeline* e controle de acesso por roles. |
 | **Docker Compose** | Sobe banco e API idênticos em qualquer máquina com um comando; os scripts de instalação rodam automaticamente. |
 | **node:test** | Executor de testes nativo do Node, sem dependências extras. |
 
@@ -273,7 +275,77 @@ Cada formulário é validado em três camadas com as mesmas regras:
 
 Erros de regra de negócio (SQLSTATE 45000) são exibidos ao usuário. Os demais viram mensagens genéricas, sem expor a estrutura do banco. Os testes automatizados cobrem os caminhos de sucesso e de erro de cada formulário.
 
-## 6. Conclusão
+## 6. Recurso extra: integração NoSQL (MongoDB)
+
+### 6.1 Por que um banco NoSQL neste sistema
+
+A loja tem dois tipos de dado em que o modelo relacional **não agrega garantias e cobra um custo de modelagem**. Para eles, adotamos **persistência poliglota**: cada dado vai para o banco cujo modelo combina com ele.
+
+| Dado | Problema no relacional | Solução no MongoDB |
+|---|---|---|
+| **Fichas técnicas** dos produtos | Cada categoria tem atributos próprios: mouse tem DPI e botões; monitor tem polegadas, painel e Hz; SSD tem interface e MB/s. Há duas saídas no relacional. Uma coluna por atributo daria dezenas de colunas quase sempre nulas e um `ALTER TABLE` a cada categoria nova. O modelo EAV (entidade-atributo-valor) perde tipos, exige um *self-join* por atributo e não indexa bem. | Coleção `fichas_tecnicas`: um documento por produto, com um objeto `atributos` de chaves livres. A **validação `$jsonSchema`** limita formato e tipos, e o **índice curinga** `atributos.$**` permite buscar por *qualquer* atributo com IXSCAN. |
+| **Log de eventos** da aplicação | Volume alto e crescente, formato que varia por tipo (venda, login, recusa…), nenhuma necessidade de transação ou JOIN. Exigiria rotina de expurgo e disputaria recursos com as vendas. | Coleção `eventos`: escrita rápida com formato flexível. O **índice TTL** apaga automaticamente o que tem mais de 90 dias, e o **aggregation pipeline** (`$match`, `$group`, `$dateTrunc`) gera o painel de atividade. |
+
+**O que continua no MySQL** é tudo o que exige ACID: preço, estoque, pedidos, clientes e usuários. A ficha usa como `_id` o mesmo `id` do produto no MySQL. Ao salvar, a API confere que o produto existe e copia a categoria **do MySQL**, a fonte da verdade.
+
+### 6.2 Modelo dos documentos
+
+```json
+// fichas_tecnicas — Monitor 27"
+{ "_id": 10, "categoria": "Monitores",
+  "atributos": { "tamanho_pol": 27, "painel": "VA", "resolucao": "2560x1440",
+                 "taxa_hz": 144, "conexoes": ["HDMI", "DisplayPort"], "hdr": true },
+  "destaques": ["144 Hz para jogos", "QHD"],
+  "atualizado_em": ISODate("…"), "atualizado_por": "USR-00001" }
+
+// eventos — venda registrada
+{ "tipo": "venda_registrada", "quando": ISODate("…"),
+  "usuario": { "id": "USR-00002", "nome": "Vitor Vendedor", "grupo": "Vendedor" },
+  "origem": { "rota": "POST /api/vendas", "ip": "172.26.0.0", "navegador": "…" },
+  "dados": { "pedido": "PED-2026-000017", "total": 49.9, "cliente": "CLI-000001",
+             "itens": [{ "produto": 8, "quantidade": 1 }] } }
+```
+
+Os 11 tipos de evento são: login (sucesso, falha, bloqueado), venda (registrada, recusada), cliente (cadastrado, recusado), reposição, alteração de preço, ficha atualizada e acesso negado.
+
+Por LGPD, o log **não** guarda CPF nem e-mail de clientes, e o IP é armazenado anonimizado (último octeto zerado).
+
+### 6.3 Recursos do MongoDB utilizados
+
+| Recurso | Uso |
+|---|---|
+| Validação `$jsonSchema` (`validationAction: error`) | Campos obrigatórios, tipos e limites. Nas fichas, nomes de atributo em `snake_case` e no máximo 30 atributos. Nos eventos, `tipo` restrito a uma lista fechada. |
+| Índice curinga `atributos.$**` | Busca como `atributos.taxa_hz ≥ 120` ou `capacidade_gb ≥ 1000` com **IXSCAN**, examinando só os documentos que casam (2 de 12 no exemplo) |
+| Índice TTL `idx_ttl_90_dias` | Expiração automática dos eventos |
+| Índices compostos `{tipo, quando}` e `{usuario.id, quando}` | Painel por tipo e auditoria por funcionário |
+| Aggregation pipeline | Eventos por tipo e por hora (`$dateTrunc` no fuso de Brasília), vendas por vendedor (`$group` com `$sum`) e lista de atributos existentes (`$objectToArray` + `$unwind`) |
+| `explain('executionStats')` | Mostrado na tela, para provar o uso do índice |
+
+### 6.4 Segurança
+
+O MongoDB segue o mesmo princípio do MySQL: **menor privilégio, sem conta administrativa na aplicação**.
+- A role `r_lojatech_app_nosql` dá à conta `lojatech_app` apenas:
+  - em `eventos`: `find` e `insert`. **O log é imutável para a aplicação.**
+  - em `fichas_tecnicas`: `find`, `insert` e `update`, sem `remove`.
+- Não há `dropDatabase`, criação de coleções, criação de índices nem gestão de usuários.
+- A tela "NoSQL · MongoDB" executa ao vivo `deleteMany`, `updateMany` em eventos, `deleteOne` em fichas e `dropDatabase`. Todos são negados com `Unauthorized`.
+- A porta do MongoDB fica disponível só em `localhost`.
+
+### 6.5 Validação de ponta a ponta
+
+A edição de ficha e a busca por atributo são validadas no navegador e na API (`validarFicha`, `validarBuscaAtributo` em `validacao.js`) e, por fim, pelo `$jsonSchema` do MongoDB.
+
+A API recusa objetos aninhados nos valores. Isso impede **injeção de operadores** (por exemplo, `{"$where": …}`).
+
+### 6.6 Vantagens obtidas
+
+1. **Evolução sem migração:** uma categoria nova ("Notebooks", com `ram_gb` e `processador`) não exige `ALTER TABLE`; basta cadastrar a ficha.
+2. **Consultas flexíveis com índice:** buscar por qualquer atributo, coisa que o EAV não faz de forma eficiente.
+3. **Isolamento de carga:** o volume de eventos não disputa *buffer pool* nem *locks* com as transações de venda.
+4. **Manutenção zero do histórico:** o TTL elimina rotinas de expurgo.
+5. **Degradação graciosa** (testada): com o MongoDB parado, login, vendas e cadastros continuam funcionando. Só as fichas e o painel de atividade ficam indisponíveis (HTTP 503), e tudo volta sozinho quando o serviço retorna.
+
+## 7. Conclusão
 
 O LojaTech mostrou que mover as regras de negócio para o SGBD traz garantias que o código da aplicação sozinho não oferece:
 - **atomicidade:** a venda é tudo ou nada;
@@ -286,10 +358,12 @@ A conta da aplicação não consegue ler senhas, CPFs nem alterar tabelas direta
 **Limitações e trabalhos futuros:**
 - substituir SHA-256 com salt por um algoritmo lento (bcrypt/Argon2). Hoje o hash é feito no banco justamente para que a aplicação não precise ler a tabela de usuários;
 - cancelamento de pedidos com estorno de estoque por procedure;
-- integração de um banco NoSQL (por exemplo, MongoDB) para logs de navegação ou carrinhos abandonados, dados semiestruturados e de alto volume em que o modelo relacional não agrega garantias.
+- replicar as fichas técnicas para um mecanismo de busca textual (por exemplo, Atlas Search) e usar *change streams* do MongoDB para alertas em tempo real.
 
 ## Referências
 
+- MONGODB, INC. *MongoDB Manual: Schema Validation, Wildcard Indexes, TTL Indexes, Aggregation Pipeline, Role-Based Access Control*. Disponível em: https://www.mongodb.com/docs/manual/.
+- SADALAGE, P. J.; FOWLER, M. *NoSQL Essencial: um guia conciso para o mundo emergente da persistência poliglota*. São Paulo: Novatec, 2013.
 - ORACLE. *MySQL 8.4 Reference Manual*. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/. Acesso em: nov. 2026.
 - ORACLE. *MySQL 8.4 Reference Manual — Using Roles*. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/roles.html.
 - ORACLE. *MySQL 8.4 Reference Manual — InnoDB Locking Reads (SELECT … FOR UPDATE)*. Disponível em: https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html.
